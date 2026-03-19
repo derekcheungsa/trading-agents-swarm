@@ -21,8 +21,8 @@ if (process.env["NODE_ENV"] === "production") {
   );
   if (fs.existsSync(staticDir)) {
     app.use(express.static(staticDir));
-    // SPA fallback — send index.html for any unmatched route
-    app.get("*", (_req, res) => {
+    // SPA fallback — send index.html for any unmatched route (Express 5 syntax)
+    app.get("/*splat", (_req, res) => {
       res.sendFile(path.join(staticDir, "index.html"));
     });
   }
