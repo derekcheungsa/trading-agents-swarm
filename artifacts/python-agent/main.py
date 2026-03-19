@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-import sys
 import threading
 import uuid
 from queue import Empty, Queue
@@ -36,170 +35,49 @@ AGENT_DISPLAY_NAMES: dict[str, str] = {
     "portfolio_manager": "Portfolio Manager",
 }
 
-AGENT_SEARCH_TERMS: list[tuple[str, str]] = [
-    ("market analyst", "market_analyst"),
-    ("technical analyst", "market_analyst"),
-    ("sentiment analyst", "social_analyst"),
-    ("social analyst", "social_analyst"),
-    ("news analyst", "news_analyst"),
-    ("fundamentals analyst", "fundamentals_analyst"),
-    ("fundamental analyst", "fundamentals_analyst"),
-    ("bull researcher", "bull_researcher"),
-    ("bullish researcher", "bull_researcher"),
-    ("bear researcher", "bear_researcher"),
-    ("bearish researcher", "bear_researcher"),
-    ("research manager", "research_manager"),
-    ("trader", "trader"),
-    ("risk manager", "risk_manager"),
-    ("portfolio manager", "portfolio_manager"),
-]
+# Maps LangGraph node names (as returned by graph.nodes) to our agent keys.
+# These are the actual node names discovered via ta.graph.nodes.keys().
+NODE_TO_AGENT: dict[str, str] = {
+    "Market Analyst": "market_analyst",
+    "Social Analyst": "social_analyst",
+    "News Analyst": "news_analyst",
+    "Fundamentals Analyst": "fundamentals_analyst",
+    "Bull Researcher": "bull_researcher",
+    "Bear Researcher": "bear_researcher",
+    "Research Manager": "research_manager",
+    "Trader": "trader",
+    "Aggressive Analyst": "risk_manager",
+    "Neutral Analyst": "risk_manager",
+    "Conservative Analyst": "risk_manager",
+    "Risk Judge": "portfolio_manager",
+}
 
 
-class AgentOutputCapture:
-    """Captures stdout and detects agent transitions from LangGraph debug output."""
-
-    def __init__(self, queue: Queue) -> None:
-        self.queue = queue
-        self._original = sys.stdout
-        self.current_agent: Optional[str] = None
-        self.agent_lines: list[str] = []
-        self.line_buffer = ""
-
-    def write(self, text: str) -> None:
-        self._original.write(text)
-        self.line_buffer += text
-
-        while "\n" in self.line_buffer:
-            line, self.line_buffer = self.line_buffer.split("\n", 1)
-            self._process_line(line)
-
-    def _process_line(self, line: str) -> None:
-        lower = line.lower()
-        matched_agent: Optional[str] = None
-        for term, key in AGENT_SEARCH_TERMS:
-            if term in lower:
-                matched_agent = key
-                break
-
-        if matched_agent and matched_agent != self.current_agent:
-            if self.current_agent:
-                self.queue.put(
-                    {
-                        "type": "agent_update",
-                        "agent": self.current_agent,
-                        "displayName": AGENT_DISPLAY_NAMES.get(
-                            self.current_agent, self.current_agent
-                        ),
-                        "status": "completed",
-                        "output": "\n".join(
-                            l for l in self.agent_lines[-30:] if l.strip()
-                        ),
-                    }
-                )
-            self.current_agent = matched_agent
-            self.agent_lines = []
-            self.queue.put(
-                {
-                    "type": "agent_update",
-                    "agent": matched_agent,
-                    "displayName": AGENT_DISPLAY_NAMES.get(matched_agent, matched_agent),
-                    "status": "running",
-                    "output": "",
-                }
-            )
-        elif self.current_agent:
-            self.agent_lines.append(line)
-
-    def flush(self) -> None:
-        self._original.flush()
-
-    def finalize(self) -> None:
-        if self.current_agent:
-            self.queue.put(
-                {
-                    "type": "agent_update",
-                    "agent": self.current_agent,
-                    "displayName": AGENT_DISPLAY_NAMES.get(
-                        self.current_agent, self.current_agent
-                    ),
-                    "status": "completed",
-                    "output": "\n".join(
-                        l for l in self.agent_lines[-30:] if l.strip()
-                    ),
-                }
-            )
-
-    def __enter__(self) -> "AgentOutputCapture":
-        sys.stdout = self
-        return self
-
-    def __exit__(self, *args: Any) -> None:
-        sys.stdout = self._original
+def _extract_node_output(updates: dict[str, Any]) -> str:
+    """Extract a human-readable output string from a node's state updates."""
+    messages = updates.get("messages", [])
+    if messages:
+        last = messages[-1]
+        if hasattr(last, "content") and last.content:
+            content = str(last.content)
+            return content[:3000]
+    for field in ("investment_plan", "final_trade_decision", "risk_debate_state"):
+        val = updates.get(field)
+        if val:
+            return str(val)[:3000]
+    return ""
 
 
-def _parse_decision(decision: Any) -> tuple[str, str]:
-    """Parse TradingAgents decision into (action, reasoning)."""
-    if isinstance(decision, dict):
-        raw_action = (
-            decision.get("action")
-            or decision.get("decision")
-            or decision.get("trade_action")
-            or ""
-        )
-        reasoning = (
-            decision.get("reasoning")
-            or decision.get("explanation")
-            or decision.get("rationale")
-            or str(decision)
-        )
-    else:
-        raw_action = str(decision)
-        reasoning = str(decision)
-
-    upper = raw_action.upper()
+def _parse_decision(raw_decision: str) -> tuple[str, str]:
+    """Extract BUY/SELL/HOLD action from the raw final_trade_decision text."""
+    upper = raw_decision.upper()
     if "BUY" in upper:
         action = "BUY"
     elif "SELL" in upper:
         action = "SELL"
     else:
         action = "HOLD"
-
-    return action, reasoning
-
-
-def _extract_state_reports(state: Any) -> dict[str, str]:
-    """Extract agent reports from the final LangGraph state."""
-    reports: dict[str, str] = {}
-    if state is None:
-        return reports
-
-    state_dict: dict[str, Any] = {}
-    if isinstance(state, dict):
-        state_dict = state
-    elif hasattr(state, "__dict__"):
-        state_dict = state.__dict__
-    elif hasattr(state, "_asdict"):
-        state_dict = state._asdict()
-
-    field_map = {
-        "market_report": "market_analyst",
-        "sentiment_report": "social_analyst",
-        "news_report": "news_analyst",
-        "fundamentals_report": "fundamentals_analyst",
-        "bull_research_report": "bull_researcher",
-        "bear_research_report": "bear_researcher",
-        "investment_plan": "trader",
-        "final_trade_decision": "portfolio_manager",
-        "risk_debate_state": "risk_manager",
-        "trader_investment_plan": "trader",
-    }
-
-    for field, agent_key in field_map.items():
-        val = state_dict.get(field)
-        if val:
-            reports[agent_key] = str(val)[:3000]
-
-    return reports
+    return action, raw_decision
 
 
 def run_analysis_thread(
@@ -210,7 +88,6 @@ def run_analysis_thread(
     max_debate_rounds: int,
 ) -> None:
     q: Queue = jobs[job_id]["queue"]
-    capture = AgentOutputCapture(q)
 
     try:
         from tradingagents.default_config import DEFAULT_CONFIG
@@ -227,6 +104,9 @@ def run_analysis_thread(
         if openrouter_key:
             os.environ["OPENAI_API_KEY"] = openrouter_key
 
+        # Use debug=False — structured node events come from stream_mode="updates" instead.
+        ta = TradingAgentsGraph(debug=False, config=config)
+
         q.put(
             {
                 "type": "started",
@@ -235,24 +115,76 @@ def run_analysis_thread(
             }
         )
 
-        with capture:
-            ta = TradingAgentsGraph(debug=True, config=config)
-            state, decision = ta.propagate(ticker, date)
+        init_state = ta.propagator.create_initial_state(ticker, date)
+        args = ta.propagator.get_graph_args()
+        # Override stream_mode so we get {node_name: state_update} chunks.
+        # get_graph_args() already includes stream_mode, so we update rather than pass separately.
+        args["stream_mode"] = "updates"
 
-        capture.finalize()
+        # "Previous agent completes when next one starts" pattern.
+        # This correctly handles debate rounds (agents cycling) and conditional nodes.
+        current_agent: Optional[str] = None
+        agent_outputs: dict[str, str] = {}
+        accumulated_state: dict[str, Any] = {}
 
-        action, reasoning = _parse_decision(decision)
-        state_reports = _extract_state_reports(state)
-
-        for agent_key, report_text in state_reports.items():
+        def _emit_completed(key: str) -> None:
             q.put(
                 {
-                    "type": "agent_report",
-                    "agent": agent_key,
-                    "displayName": AGENT_DISPLAY_NAMES.get(agent_key, agent_key),
-                    "output": report_text,
+                    "type": "agent_update",
+                    "agent": key,
+                    "displayName": AGENT_DISPLAY_NAMES.get(key, key),
+                    "status": "completed",
+                    "output": agent_outputs.get(key, ""),
                 }
             )
+
+        # stream_mode="updates" is set in args above → each chunk is {node_name: partial_state_update}
+        for chunk in ta.graph.stream(init_state, **args):
+            for node_name, updates in chunk.items():
+                agent_key: Optional[str] = NODE_TO_AGENT.get(node_name)
+
+                # Always accumulate full state for final decision extraction.
+                if isinstance(updates, dict):
+                    for k, v in updates.items():
+                        if k == "messages" and isinstance(v, list):
+                            accumulated_state.setdefault("messages", [])
+                            accumulated_state["messages"] = accumulated_state["messages"] + v
+                        else:
+                            accumulated_state[k] = v
+
+                if agent_key is None:
+                    continue
+
+                output = _extract_node_output(updates)
+                if output:
+                    agent_outputs[agent_key] = output
+
+                # New agent coming in → complete the previous one, start this one
+                if agent_key != current_agent:
+                    if current_agent is not None:
+                        _emit_completed(current_agent)
+                    current_agent = agent_key
+                    q.put(
+                        {
+                            "type": "agent_update",
+                            "agent": agent_key,
+                            "displayName": AGENT_DISPLAY_NAMES.get(agent_key, agent_key),
+                            "status": "running",
+                            "output": "",
+                        }
+                    )
+
+        # Mark the last active agent as completed.
+        if current_agent is not None:
+            _emit_completed(current_agent)
+
+        # Extract decision from accumulated state (raw text → BUY/SELL/HOLD + full reasoning).
+        raw_decision = str(
+            accumulated_state.get("final_trade_decision")
+            or accumulated_state.get("investment_plan")
+            or "HOLD"
+        )
+        action, reasoning = _parse_decision(raw_decision)
 
         jobs[job_id]["status"] = "completed"
         jobs[job_id]["decision"] = action
@@ -270,7 +202,7 @@ def run_analysis_thread(
         import traceback
 
         err_msg = f"{exc}\n{traceback.format_exc()}"
-        capture._original.write(f"[ERROR] {err_msg}\n")
+        print(f"[ERROR in run_analysis_thread] {err_msg}", flush=True)
         jobs[job_id]["status"] = "error"
         jobs[job_id]["error"] = str(exc)
 

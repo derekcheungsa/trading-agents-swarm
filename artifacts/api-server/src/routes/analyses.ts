@@ -127,8 +127,8 @@ function startJobConsumer(analysisId: number, jobId: string): void {
         for (const listener of cache.listeners) {
           listener(""); // sentinel: empty string means "done"
         }
-        // Clean up after a delay so any last-second clients can still read
-        setTimeout(() => jobCaches.delete(jobId), 60_000);
+        // Clean up after a delay so any late-connecting clients can still read the full history
+        setTimeout(() => jobCaches.delete(jobId), 5 * 60_000);
       });
 
       pythonRes.on("error", (err) => {
@@ -314,22 +314,30 @@ router.get("/analyses/:id/stream", async (req, res): Promise<void> => {
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
 
-  // Case 1: Already finished — serve from DB state directly
-  if (analysis.status === "completed" || analysis.status === "error") {
-    const eventPayload =
-      analysis.status === "completed"
-        ? { type: "completed", decision: analysis.decision, reasoning: analysis.reasoning }
-        : { type: "error", message: analysis.errorMessage ?? "Unknown error" };
+  const cache = jobCaches.get(analysis.jobId ?? "");
 
-    res.write(`data: ${JSON.stringify(eventPayload)}\n\n`);
-    res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
-    res.end();
+  // Case 1: Already finished
+  if (analysis.status === "completed" || analysis.status === "error") {
+    if (cache && cache.lines.length > 0) {
+      // Serve full event history from in-memory cache (available for 60s after completion)
+      for (const line of cache.lines) {
+        res.write(line);
+      }
+      res.end();
+    } else {
+      // Cache expired — synthesize just the final event from DB
+      const eventPayload =
+        analysis.status === "completed"
+          ? { type: "completed", decision: analysis.decision, reasoning: analysis.reasoning }
+          : { type: "error", message: analysis.errorMessage ?? "Unknown error" };
+      res.write(`data: ${JSON.stringify(eventPayload)}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+      res.end();
+    }
     return;
   }
 
   // Case 2: Still running — serve from fan-out cache
-  const cache = jobCaches.get(analysis.jobId ?? "");
-
   if (!cache) {
     // No cache = job was started before this server instance (e.g. after restart)
     res.write(`data: ${JSON.stringify({ type: "error", message: "Stream no longer available. The server may have restarted." })}\n\n`);
