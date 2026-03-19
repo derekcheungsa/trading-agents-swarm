@@ -39,7 +39,7 @@ export default function Dashboard() {
   });
 
   // SSE Stream hook
-  const { streamData, resetStream } = useAgentStream(selectedId);
+  const { streamData, resetStream, elapsedSeconds, completedCount } = useAgentStream(selectedId);
 
   // Create Mutation
   const createMutation = useCreateAnalysis();
@@ -67,7 +67,8 @@ export default function Dashboard() {
   // Determine what to display for the active view
   const isViewingHistory = !!selectedId;
   const activeRecord = analysisRecord;
-  const isStreaming = streamData.status === "streaming" || streamData.status === "connecting";
+  const isConnecting = streamData.status === "connecting";
+  const isStreaming = streamData.status === "streaming" || isConnecting;
   const showStream = isStreaming || streamData.agents.length > 0;
   
   // Combine DB state and Stream state smoothly
@@ -235,8 +236,13 @@ export default function Dashboard() {
                   )}
 
                   {/* Agent Stream - shown if streaming or if we have stream data */}
-                  {(showStream) && (
-                    <AgentLog agents={streamData.agents} />
+                  {showStream && (
+                    <AgentLog
+                      agents={streamData.agents}
+                      elapsedSeconds={elapsedSeconds}
+                      completedCount={completedCount}
+                      isConnecting={isConnecting}
+                    />
                   )}
                   
                   {/* Empty state for historical items that didn't record stream */}
