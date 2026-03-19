@@ -355,3 +355,94 @@ export function useGetAnalysis<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * Server-Sent Events (SSE) stream. Emits JSON event objects with a `type` field.
+Event types: `started`, `agent_update`, `agent_report`, `completed`, `error`, `done`.
+Connect using the browser's `EventSource` API.
+
+ * @summary Stream real-time agent progress for an analysis
+ */
+export const getStreamAnalysisUrl = (id: number) => {
+  return `/api/analyses/${id}/stream`;
+};
+
+export const streamAnalysis = async (
+  id: number,
+  options?: RequestInit,
+): Promise<string> => {
+  return customFetch<string>(getStreamAnalysisUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getStreamAnalysisQueryKey = (id: number) => {
+  return [`/api/analyses/${id}/stream`] as const;
+};
+
+export const getStreamAnalysisQueryOptions = <
+  TData = Awaited<ReturnType<typeof streamAnalysis>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof streamAnalysis>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getStreamAnalysisQueryKey(id);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof streamAnalysis>>> = ({
+    signal,
+  }) => streamAnalysis(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof streamAnalysis>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type StreamAnalysisQueryResult = NonNullable<
+  Awaited<ReturnType<typeof streamAnalysis>>
+>;
+export type StreamAnalysisQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Stream real-time agent progress for an analysis
+ */
+
+export function useStreamAnalysis<
+  TData = Awaited<ReturnType<typeof streamAnalysis>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof streamAnalysis>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getStreamAnalysisQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}

@@ -1,10 +1,16 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { format } from "date-fns";
 import { Activity, Plus, Search, Calendar, Cpu, Layers } from "lucide-react";
-import { useCreateAnalysis, useListAnalyses, useGetAnalysis } from "@workspace/api-client-react";
+import {
+  useCreateAnalysis,
+  useListAnalyses,
+  useGetAnalysis,
+  getListAnalysesQueryKey,
+  getGetAnalysisQueryKey,
+} from "@workspace/api-client-react";
 import { useAgentStream } from "@/hooks/use-agent-stream";
 import { Badge, cn } from "@/components/Badge";
 import { AgentLog } from "@/components/AgentLog";
@@ -24,12 +30,12 @@ export default function Dashboard() {
 
   // Fetch History (polls every 30s)
   const { data: analyses = [], isLoading: isLoadingHistory } = useListAnalyses({
-    query: { refetchInterval: 30000 }
+    query: { queryKey: getListAnalysesQueryKey(), refetchInterval: 30000 }
   });
 
   // Fetch selected analysis details if not streaming
   const { data: analysisRecord, isLoading: isLoadingRecord } = useGetAnalysis(selectedId!, {
-    query: { enabled: !!selectedId }
+    query: { queryKey: getGetAnalysisQueryKey(selectedId!), enabled: !!selectedId }
   });
 
   // SSE Stream hook
@@ -65,8 +71,8 @@ export default function Dashboard() {
   const showStream = isStreaming || streamData.agents.length > 0;
   
   // Combine DB state and Stream state smoothly
-  const displayDecision = streamData.decision || activeRecord?.decision;
-  const displayReasoning = streamData.reasoning || activeRecord?.reasoning;
+  const displayDecision = (streamData.decision || activeRecord?.decision) ?? null;
+  const displayReasoning = (streamData.reasoning || activeRecord?.reasoning) ?? null;
   const displayStatus = isStreaming ? "running" : (activeRecord?.status || "pending");
 
   return (

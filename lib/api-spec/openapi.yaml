@@ -98,6 +98,36 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /analyses/{id}/stream:
+    get:
+      operationId: streamAnalysis
+      tags: [analyses]
+      summary: Stream real-time agent progress for an analysis
+      description: |
+        Server-Sent Events (SSE) stream. Emits JSON event objects with a `type` field.
+        Event types: `started`, `agent_update`, `agent_report`, `completed`, `error`, `done`.
+        Connect using the browser's `EventSource` API.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: SSE stream of agent progress events
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: Server-Sent Events stream
+        "404":
+          description: Analysis not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:

@@ -72,3 +72,14 @@ export const GetAnalysisResponse = zod.object({
   createdAt: zod.date(),
   updatedAt: zod.date(),
 });
+
+/**
+ * Server-Sent Events (SSE) stream. Emits JSON event objects with a `type` field.
+Event types: `started`, `agent_update`, `agent_report`, `completed`, `error`, `done`.
+Connect using the browser's `EventSource` API.
+
+ * @summary Stream real-time agent progress for an analysis
+ */
+export const StreamAnalysisParams = zod.object({
+  id: zod.coerce.number(),
+});
