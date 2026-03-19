@@ -17,6 +17,152 @@ const PYTHON_AGENT_PORT = parseInt(
   10
 );
 
+// ---------------------------------------------------------------------------
+// Fan-out event cache
+// Each running job gets an entry here. Events are buffered so that both the
+// background DB-update consumer and any number of frontend SSE clients can
+// receive every event — even if the frontend connects after the job starts.
+// ---------------------------------------------------------------------------
+interface JobCache {
+  lines: string[];        // raw "data: {...}\n\n" lines, in order
+  done: boolean;          // true once the Python stream has ended
+  listeners: Set<(line: string) => void>;
+}
+
+const jobCaches = new Map<string, JobCache>();
+
+function getOrCreateCache(jobId: string): JobCache {
+  if (!jobCaches.has(jobId)) {
+    jobCaches.set(jobId, { lines: [], done: false, listeners: new Set() });
+  }
+  return jobCaches.get(jobId)!;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function normalizeDecision(raw: unknown): string {
+  const str = typeof raw === "string" ? raw : JSON.stringify(raw);
+  const upper = str.toUpperCase();
+  return upper.includes("BUY") ? "BUY" : upper.includes("SELL") ? "SELL" : "HOLD";
+}
+
+function updateDbFromEvent(
+  analysisId: number,
+  event: { type: string; decision?: unknown; reasoning?: string; message?: string }
+): void {
+  if (event.type === "completed") {
+    const decision = normalizeDecision(event.decision ?? "");
+    db.update(analysesTable)
+      .set({ status: "completed", decision, reasoning: event.reasoning ?? String(event.decision ?? "") })
+      .where(eq(analysesTable.id, analysisId))
+      .then(() => {})
+      .catch(console.error);
+  } else if (event.type === "error") {
+    db.update(analysesTable)
+      .set({ status: "error", errorMessage: event.message ?? "Unknown error" })
+      .where(eq(analysesTable.id, analysisId))
+      .then(() => {})
+      .catch(console.error);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Start the single Python SSE consumer for a job.
+// All events are:
+//  1. Buffered in jobCaches so late-connecting frontend clients get the full history
+//  2. Broadcast to any currently-connected frontend SSE listeners
+//  3. Used to update the DB for completed/error events
+// ---------------------------------------------------------------------------
+function startJobConsumer(analysisId: number, jobId: string): void {
+  const cache = getOrCreateCache(jobId);
+
+  const req = http.request(
+    {
+      hostname: PYTHON_AGENT_HOST,
+      port: PYTHON_AGENT_PORT,
+      path: `/agent/stream/${jobId}`,
+      method: "GET",
+    },
+    (pythonRes) => {
+      let buffer = "";
+
+      pythonRes.on("data", (chunk: Buffer) => {
+        buffer += chunk.toString();
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+
+        for (const part of parts) {
+          if (!part.trim()) continue;
+          const sseBlock = part + "\n\n";
+
+          // Buffer for future clients
+          cache.lines.push(sseBlock);
+
+          // Broadcast to currently-connected frontend clients
+          for (const listener of cache.listeners) {
+            listener(sseBlock);
+          }
+
+          // Update DB if needed
+          for (const rawLine of part.split("\n")) {
+            if (rawLine.startsWith("data: ")) {
+              try {
+                updateDbFromEvent(analysisId, JSON.parse(rawLine.slice(6)));
+              } catch {}
+            }
+          }
+        }
+      });
+
+      pythonRes.on("end", () => {
+        if (buffer.trim()) {
+          const sseBlock = buffer + "\n\n";
+          cache.lines.push(sseBlock);
+          for (const listener of cache.listeners) {
+            listener(sseBlock);
+          }
+        }
+        cache.done = true;
+        for (const listener of cache.listeners) {
+          listener(""); // sentinel: empty string means "done"
+        }
+        // Clean up after a delay so any last-second clients can still read
+        setTimeout(() => jobCaches.delete(jobId), 60_000);
+      });
+
+      pythonRes.on("error", (err) => {
+        const errLine = `data: ${JSON.stringify({ type: "error", message: err.message })}\n\n`;
+        cache.lines.push(errLine);
+        for (const listener of cache.listeners) {
+          listener(errLine);
+        }
+        cache.done = true;
+        for (const listener of cache.listeners) {
+          listener("");
+        }
+        updateDbFromEvent(analysisId, { type: "error", message: err.message });
+      });
+    }
+  );
+
+  req.on("error", (err) => {
+    const errLine = `data: ${JSON.stringify({ type: "error", message: `Could not connect to Python agent: ${err.message}` })}\n\n`;
+    const cache2 = getOrCreateCache(jobId);
+    cache2.lines.push(errLine);
+    for (const listener of cache2.listeners) {
+      listener(errLine);
+    }
+    cache2.done = true;
+    for (const listener of cache2.listeners) {
+      listener("");
+    }
+    updateDbFromEvent(analysisId, { type: "error", message: err.message });
+  });
+
+  req.end();
+}
+
 async function callPythonAgent(
   path: string,
   method: "GET" | "POST",
@@ -67,73 +213,9 @@ async function callPythonAgent(
   });
 }
 
-function normalizeDecision(raw: unknown): string {
-  const str = typeof raw === "string" ? raw : JSON.stringify(raw);
-  const upper = str.toUpperCase();
-  return upper.includes("BUY") ? "BUY" : upper.includes("SELL") ? "SELL" : "HOLD";
-}
-
-function updateDbFromEvent(analysisId: number, event: { type: string; decision?: unknown; reasoning?: string; message?: string }): void {
-  if (event.type === "completed") {
-    const decision = normalizeDecision(event.decision ?? "");
-    db.update(analysesTable)
-      .set({ status: "completed", decision, reasoning: event.reasoning ?? String(event.decision ?? "") })
-      .where(eq(analysesTable.id, analysisId))
-      .then(() => {})
-      .catch(console.error);
-  } else if (event.type === "error") {
-    db.update(analysesTable)
-      .set({ status: "error", errorMessage: event.message ?? "Unknown error" })
-      .where(eq(analysesTable.id, analysisId))
-      .then(() => {})
-      .catch(console.error);
-  }
-}
-
-function consumeJobInBackground(analysisId: number, jobId: string): void {
-  const bgReq = http.request(
-    {
-      hostname: PYTHON_AGENT_HOST,
-      port: PYTHON_AGENT_PORT,
-      path: `/agent/stream/${jobId}`,
-      method: "GET",
-    },
-    (bgRes) => {
-      let buffer = "";
-      bgRes.on("data", (chunk: Buffer) => {
-        buffer += chunk.toString();
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              updateDbFromEvent(analysisId, JSON.parse(line.slice(6)));
-            } catch {}
-          }
-        }
-      });
-      bgRes.on("end", () => {
-        if (buffer.startsWith("data: ")) {
-          try {
-            updateDbFromEvent(analysisId, JSON.parse(buffer.slice(6)));
-          } catch {}
-        }
-      });
-      bgRes.on("error", (err) => {
-        console.error(`[bg-consumer] stream error for analysis ${analysisId}:`, err.message);
-      });
-    }
-  );
-  bgReq.on("error", (err) => {
-    console.error(`[bg-consumer] request error for analysis ${analysisId}:`, err.message);
-    db.update(analysesTable)
-      .set({ status: "error", errorMessage: `Stream connection lost: ${err.message}` })
-      .where(eq(analysesTable.id, analysisId))
-      .then(() => {})
-      .catch(console.error);
-  });
-  bgReq.end();
-}
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
 
 router.post("/analyze", async (req, res): Promise<void> => {
   const parsed = CreateAnalysisBody.safeParse(req.body);
@@ -171,8 +253,9 @@ router.post("/analyze", async (req, res): Promise<void> => {
     })
     .returning();
 
-  // Start a background SSE consumer to ensure DB is updated even if no frontend client connects
-  consumeJobInBackground(analysis.id, job_id);
+  // Start the single fan-out consumer. It buffers every event so frontend
+  // clients can connect at any time and still receive the full stream.
+  startJobConsumer(analysis.id, job_id);
 
   res.status(201).json(GetAnalysisResponse.parse(analysis));
 });
@@ -207,9 +290,7 @@ router.get("/analyses/:id", async (req, res): Promise<void> => {
 });
 
 router.get("/analyses/:id/stream", async (req, res): Promise<void> => {
-  const rawId = Array.isArray(req.params.id)
-    ? req.params.id[0]
-    : req.params.id;
+  const rawId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const id = parseInt(rawId, 10);
 
   if (isNaN(id)) {
@@ -227,20 +308,17 @@ router.get("/analyses/:id/stream", async (req, res): Promise<void> => {
     return;
   }
 
-  if (analysis.status === "completed" || analysis.status === "error") {
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Accel-Buffering", "no");
-    res.flushHeaders();
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders();
 
+  // Case 1: Already finished — serve from DB state directly
+  if (analysis.status === "completed" || analysis.status === "error") {
     const eventPayload =
       analysis.status === "completed"
-        ? {
-            type: "completed",
-            decision: analysis.decision,
-            reasoning: analysis.reasoning,
-          }
+        ? { type: "completed", decision: analysis.decision, reasoning: analysis.reasoning }
         : { type: "error", message: analysis.errorMessage ?? "Unknown error" };
 
     res.write(`data: ${JSON.stringify(eventPayload)}\n\n`);
@@ -249,66 +327,42 @@ router.get("/analyses/:id/stream", async (req, res): Promise<void> => {
     return;
   }
 
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-  res.setHeader("X-Accel-Buffering", "no");
-  res.flushHeaders();
+  // Case 2: Still running — serve from fan-out cache
+  const cache = jobCaches.get(analysis.jobId ?? "");
 
-  const pythonReq = http.request(
-    {
-      hostname: PYTHON_AGENT_HOST,
-      port: PYTHON_AGENT_PORT,
-      path: `/agent/stream/${analysis.jobId}`,
-      method: "GET",
-    },
-    (pythonRes) => {
-      let buffer = "";
-
-      pythonRes.on("data", (chunk: Buffer) => {
-        const text = chunk.toString();
-        buffer += text;
-
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          res.write(line + "\n");
-
-          if (line.startsWith("data: ")) {
-            try {
-              updateDbFromEvent(id, JSON.parse(line.slice(6)));
-            } catch {}
-          }
-        }
-      });
-
-      pythonRes.on("end", () => {
-        if (buffer) res.write(buffer + "\n");
-        res.end();
-      });
-
-      pythonRes.on("error", (err) => {
-        res.write(
-          `data: ${JSON.stringify({ type: "error", message: err.message })}\n\n`
-        );
-        res.end();
-      });
-    }
-  );
-
-  pythonReq.on("error", (err) => {
-    res.write(
-      `data: ${JSON.stringify({ type: "error", message: `Could not connect to Python agent: ${err.message}` })}\n\n`
-    );
+  if (!cache) {
+    // No cache = job was started before this server instance (e.g. after restart)
+    res.write(`data: ${JSON.stringify({ type: "error", message: "Stream no longer available. The server may have restarted." })}\n\n`);
     res.end();
-  });
+    return;
+  }
+
+  // Replay all buffered events first
+  for (const line of cache.lines) {
+    res.write(line);
+  }
+
+  // If already done, close
+  if (cache.done) {
+    res.end();
+    return;
+  }
+
+  // Subscribe to future events
+  const listener = (sseBlock: string) => {
+    if (sseBlock === "") {
+      // sentinel: stream ended
+      res.end();
+    } else {
+      res.write(sseBlock);
+    }
+  };
+
+  cache.listeners.add(listener);
 
   req.on("close", () => {
-    pythonReq.destroy();
+    cache.listeners.delete(listener);
   });
-
-  pythonReq.end();
 });
 
 export default router;
