@@ -1,0 +1,14 @@
+packages:
+  "framer-motion": "For smooth agent streaming animations and layout transitions"
+  "clsx": "For conditional class name merging"
+  "tailwind-merge": "For merging tailwind classes safely"
+  "date-fns": "For formatting dates in the history sidebar"
+  "lucide-react": "For beautiful terminal-style icons"
+  "@hookform/resolvers": "For Zod form validation"
+  "react-hook-form": "For robust form state management"
+
+images: []
+
+notes:
+  - Expects SSE at /api/analyses/{id}/stream
+  - Uses @workspace/api-client-react for all REST calls

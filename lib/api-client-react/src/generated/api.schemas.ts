@@ -8,3 +8,45 @@
 export interface HealthStatus {
   status: string;
 }
+
+export interface CreateAnalysisBody {
+  /** Stock ticker symbol (e.g. NVDA, AAPL) */
+  ticker: string;
+  /** Analysis date in YYYY-MM-DD format */
+  date: string;
+  /** OpenRouter model identifier */
+  model?: string;
+  /** Number of debate rounds between bull/bear researchers */
+  maxDebateRounds?: number;
+}
+
+export type AnalysisStatus =
+  (typeof AnalysisStatus)[keyof typeof AnalysisStatus];
+
+export const AnalysisStatus = {
+  pending: "pending",
+  running: "running",
+  completed: "completed",
+  error: "error",
+} as const;
+
+export interface Analysis {
+  id: number;
+  ticker: string;
+  date: string;
+  model: string;
+  status: AnalysisStatus;
+  /** @nullable */
+  decision?: string | null;
+  /** @nullable */
+  reasoning?: string | null;
+  jobId: string;
+  /** @nullable */
+  errorMessage?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ErrorResponse {
+  error: string;
+}

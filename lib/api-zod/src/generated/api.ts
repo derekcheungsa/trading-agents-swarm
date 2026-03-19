@@ -14,3 +14,61 @@ import * as zod from "zod";
 export const HealthCheckResponse = zod.object({
   status: zod.string(),
 });
+
+/**
+ * @summary Start a new trading analysis
+ */
+export const createAnalysisBodyModelDefault = `minimax/minimax-m2.5:online`;
+export const createAnalysisBodyMaxDebateRoundsDefault = 1;
+
+export const CreateAnalysisBody = zod.object({
+  ticker: zod.string().describe("Stock ticker symbol (e.g. NVDA, AAPL)"),
+  date: zod.string().describe("Analysis date in YYYY-MM-DD format"),
+  model: zod
+    .string()
+    .default(createAnalysisBodyModelDefault)
+    .describe("OpenRouter model identifier"),
+  maxDebateRounds: zod
+    .number()
+    .default(createAnalysisBodyMaxDebateRoundsDefault)
+    .describe("Number of debate rounds between bull\/bear researchers"),
+});
+
+/**
+ * @summary List all analyses
+ */
+export const ListAnalysesResponseItem = zod.object({
+  id: zod.number(),
+  ticker: zod.string(),
+  date: zod.string(),
+  model: zod.string(),
+  status: zod.enum(["pending", "running", "completed", "error"]),
+  decision: zod.string().nullish(),
+  reasoning: zod.string().nullish(),
+  jobId: zod.string(),
+  errorMessage: zod.string().nullish(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+});
+export const ListAnalysesResponse = zod.array(ListAnalysesResponseItem);
+
+/**
+ * @summary Get a specific analysis
+ */
+export const GetAnalysisParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const GetAnalysisResponse = zod.object({
+  id: zod.number(),
+  ticker: zod.string(),
+  date: zod.string(),
+  model: zod.string(),
+  status: zod.enum(["pending", "running", "completed", "error"]),
+  decision: zod.string().nullish(),
+  reasoning: zod.string().nullish(),
+  jobId: zod.string(),
+  errorMessage: zod.string().nullish(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+});

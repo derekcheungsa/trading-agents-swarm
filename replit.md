@@ -20,20 +20,50 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 
 ```text
 artifacts-monorepo/
-├── artifacts/              # Deployable applications
-│   └── api-server/         # Express API server
-├── lib/                    # Shared libraries
-│   ├── api-spec/           # OpenAPI spec + Orval codegen config
-│   ├── api-client-react/   # Generated React Query hooks
-│   ├── api-zod/            # Generated Zod schemas from OpenAPI
-│   └── db/                 # Drizzle ORM schema + DB connection
-├── scripts/                # Utility scripts (single workspace package)
-│   └── src/                # Individual .ts scripts, run via `pnpm --filter @workspace/scripts run <script>`
-├── pnpm-workspace.yaml     # pnpm workspace (artifacts/*, lib/*, lib/integrations/*, scripts)
-├── tsconfig.base.json      # Shared TS options (composite, bundler resolution, es2022)
-├── tsconfig.json           # Root TS project references
-└── package.json            # Root package with hoisted devDeps
+├── artifacts/                 # Deployable applications
+│   ├── api-server/            # Express API server (port assigned by Replit, proxied at /api)
+│   ├── python-agent/          # FastAPI Python service (port 8000, internal only)
+│   └── trading-dashboard/     # React + Vite frontend (TradingAgents UI)
+├── lib/                       # Shared libraries
+│   ├── api-spec/              # OpenAPI spec + Orval codegen config
+│   ├── api-client-react/      # Generated React Query hooks
+│   ├── api-zod/               # Generated Zod schemas from OpenAPI
+│   └── db/                    # Drizzle ORM schema + DB connection
+├── scripts/                   # Utility scripts (single workspace package)
+│   └── src/                   # Individual .ts scripts, run via `pnpm --filter @workspace/scripts run <script>`
+├── pnpm-workspace.yaml        # pnpm workspace (artifacts/*, lib/*, lib/integrations/*, scripts)
+├── tsconfig.base.json         # Shared TS options (composite, bundler resolution, es2022)
+├── tsconfig.json              # Root TS project references
+└── package.json               # Root package with hoisted devDeps
 ```
+
+## TradingAgents App
+
+A multi-agent LLM financial trading framework exposed as a web app. Users enter a stock ticker and date, 9 AI agents run in real-time (streaming via SSE), and a BUY/HOLD/SELL decision is returned with reasoning.
+
+### Architecture
+
+1. **trading-dashboard** (React + Vite): User-facing UI. Submits analysis requests and streams real-time agent progress via `EventSource` from `/api/analyses/:id/stream`.
+2. **api-server** (Express): REST API with SSE proxy. Creates analyses in PostgreSQL, proxies SSE stream from the Python service, and intercepts `completed`/`error` events to update DB.
+3. **python-agent** (FastAPI + Python 3.12): Runs the actual TradingAgents LangGraph framework. Each analysis job runs in its own thread with stdout capture for real-time agent detection.
+
+### Key Files
+
+- `artifacts/python-agent/main.py` — FastAPI app; `/agent/analyze` (start job), `/agent/stream/:job_id` (SSE), `/agent/health`
+- `artifacts/api-server/src/routes/analyses.ts` — Express routes: POST `/analyze`, GET `/analyses`, GET `/analyses/:id`, GET `/analyses/:id/stream`
+- `artifacts/trading-dashboard/src/hooks/use-agent-stream.ts` — SSE hook
+- `artifacts/trading-dashboard/src/pages/Dashboard.tsx` — main UI
+- `lib/db/src/schema/analyses.ts` — DB schema (analysesTable)
+- `lib/api-spec/openapi.yaml` — API contract
+
+### Environment Secrets
+
+- `OPENROUTER_API_KEY` — used by the Python agent (set as `OPENAI_API_KEY` for the OpenRouter-compatible client)
+- `FINANCIAL_MODELING_PREP_API_KEY` — used by TradingAgents for fundamental/news data
+
+### Default LLM Model
+
+`minimax/minimax-m2.5:online` (configurable per-analysis via the UI)
 
 ## TypeScript & Composite Projects
 
