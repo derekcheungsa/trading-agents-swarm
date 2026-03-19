@@ -67,6 +67,74 @@ async function callPythonAgent(
   });
 }
 
+function normalizeDecision(raw: unknown): string {
+  const str = typeof raw === "string" ? raw : JSON.stringify(raw);
+  const upper = str.toUpperCase();
+  return upper.includes("BUY") ? "BUY" : upper.includes("SELL") ? "SELL" : "HOLD";
+}
+
+function updateDbFromEvent(analysisId: number, event: { type: string; decision?: unknown; reasoning?: string; message?: string }): void {
+  if (event.type === "completed") {
+    const decision = normalizeDecision(event.decision ?? "");
+    db.update(analysesTable)
+      .set({ status: "completed", decision, reasoning: event.reasoning ?? String(event.decision ?? "") })
+      .where(eq(analysesTable.id, analysisId))
+      .then(() => {})
+      .catch(console.error);
+  } else if (event.type === "error") {
+    db.update(analysesTable)
+      .set({ status: "error", errorMessage: event.message ?? "Unknown error" })
+      .where(eq(analysesTable.id, analysisId))
+      .then(() => {})
+      .catch(console.error);
+  }
+}
+
+function consumeJobInBackground(analysisId: number, jobId: string): void {
+  const bgReq = http.request(
+    {
+      hostname: PYTHON_AGENT_HOST,
+      port: PYTHON_AGENT_PORT,
+      path: `/agent/stream/${jobId}`,
+      method: "GET",
+    },
+    (bgRes) => {
+      let buffer = "";
+      bgRes.on("data", (chunk: Buffer) => {
+        buffer += chunk.toString();
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              updateDbFromEvent(analysisId, JSON.parse(line.slice(6)));
+            } catch {}
+          }
+        }
+      });
+      bgRes.on("end", () => {
+        if (buffer.startsWith("data: ")) {
+          try {
+            updateDbFromEvent(analysisId, JSON.parse(buffer.slice(6)));
+          } catch {}
+        }
+      });
+      bgRes.on("error", (err) => {
+        console.error(`[bg-consumer] stream error for analysis ${analysisId}:`, err.message);
+      });
+    }
+  );
+  bgReq.on("error", (err) => {
+    console.error(`[bg-consumer] request error for analysis ${analysisId}:`, err.message);
+    db.update(analysesTable)
+      .set({ status: "error", errorMessage: `Stream connection lost: ${err.message}` })
+      .where(eq(analysesTable.id, analysisId))
+      .then(() => {})
+      .catch(console.error);
+  });
+  bgReq.end();
+}
+
 router.post("/analyze", async (req, res): Promise<void> => {
   const parsed = CreateAnalysisBody.safeParse(req.body);
   if (!parsed.success) {
@@ -102,6 +170,9 @@ router.post("/analyze", async (req, res): Promise<void> => {
       jobId: job_id,
     })
     .returning();
+
+  // Start a background SSE consumer to ensure DB is updated even if no frontend client connects
+  consumeJobInBackground(analysis.id, job_id);
 
   res.status(201).json(GetAnalysisResponse.parse(analysis));
 });
@@ -206,40 +277,7 @@ router.get("/analyses/:id/stream", async (req, res): Promise<void> => {
 
           if (line.startsWith("data: ")) {
             try {
-              const event = JSON.parse(line.slice(6));
-
-              if (event.type === "completed") {
-                const rawDecision: string =
-                  typeof event.decision === "string"
-                    ? event.decision
-                    : JSON.stringify(event.decision);
-
-                const upper = rawDecision.toUpperCase();
-                const decision = upper.includes("BUY")
-                  ? "BUY"
-                  : upper.includes("SELL")
-                    ? "SELL"
-                    : "HOLD";
-
-                db.update(analysesTable)
-                  .set({
-                    status: "completed",
-                    decision,
-                    reasoning: event.reasoning ?? rawDecision,
-                  })
-                  .where(eq(analysesTable.id, id))
-                  .then(() => {})
-                  .catch(console.error);
-              } else if (event.type === "error") {
-                db.update(analysesTable)
-                  .set({
-                    status: "error",
-                    errorMessage: event.message ?? "Unknown error",
-                  })
-                  .where(eq(analysesTable.id, id))
-                  .then(() => {})
-                  .catch(console.error);
-              }
+              updateDbFromEvent(id, JSON.parse(line.slice(6)));
             } catch {}
           }
         }
