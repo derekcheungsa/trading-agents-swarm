@@ -54,7 +54,12 @@ function makeInitialAgentList(): AgentState[] {
   }));
 }
 
-export function useAgentStream(analysisId: number | null) {
+/**
+ * @param analysisId - The analysis to stream. null means idle.
+ * @param isLive - True when this is a freshly-started run (pre-populates agents immediately).
+ *                 False for history-view mode (waits for SSE events before showing agents).
+ */
+export function useAgentStream(analysisId: number | null, isLive = false) {
   const queryClient = useQueryClient();
   const startedAtRef = useRef<number | null>(null);
 
@@ -86,16 +91,21 @@ export function useAgentStream(analysisId: number | null) {
       return;
     }
 
-    startedAtRef.current = Date.now();
-    setElapsedSeconds(0);
-
-    setData({
-      agents: makeInitialAgentList(),
-      decision: null,
-      reasoning: null,
-      status: "connecting",
-      error: null,
-    });
+    if (isLive) {
+      startedAtRef.current = Date.now();
+      setElapsedSeconds(0);
+      setData({
+        agents: makeInitialAgentList(),
+        decision: null,
+        reasoning: null,
+        status: "connecting",
+        error: null,
+      });
+    } else {
+      startedAtRef.current = null;
+      setElapsedSeconds(0);
+      setData((prev) => ({ ...prev, status: "connecting", agents: [], error: null }));
+    }
 
     const es = new EventSource(`/api/analyses/${analysisId}/stream`);
 
@@ -190,7 +200,7 @@ export function useAgentStream(analysisId: number | null) {
     return () => {
       es.close();
     };
-  }, [analysisId, queryClient, reset]);
+  }, [analysisId, isLive, queryClient, reset]);
 
   useEffect(() => {
     const isActive = data.status === "connecting" || data.status === "streaming";

@@ -27,6 +27,7 @@ type FormValues = z.infer<typeof formSchema>;
 
 export default function Dashboard() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [isLiveRun, setIsLiveRun] = useState(false);
 
   // Fetch History (polls every 30s)
   const { data: analyses = [], isLoading: isLoadingHistory } = useListAnalyses({
@@ -38,8 +39,8 @@ export default function Dashboard() {
     query: { queryKey: getGetAnalysisQueryKey(selectedId!), enabled: !!selectedId }
   });
 
-  // SSE Stream hook
-  const { streamData, resetStream, elapsedSeconds, completedCount } = useAgentStream(selectedId);
+  // SSE Stream hook — isLiveRun is true only when this is a freshly-started analysis
+  const { streamData, resetStream, elapsedSeconds, completedCount } = useAgentStream(selectedId, isLiveRun);
 
   // Create Mutation
   const createMutation = useCreateAnalysis();
@@ -56,8 +57,10 @@ export default function Dashboard() {
 
   const onSubmit = async (data: FormValues) => {
     resetStream();
+    setIsLiveRun(false);
     try {
       const result = await createMutation.mutateAsync({ data });
+      setIsLiveRun(true);
       setSelectedId(result.id);
     } catch (err) {
       console.error("Failed to start analysis", err);
@@ -69,6 +72,8 @@ export default function Dashboard() {
   const activeRecord = analysisRecord;
   const isConnecting = streamData.status === "connecting";
   const isStreaming = streamData.status === "streaming" || isConnecting;
+  // Only show the agent panel when we have real agent data from SSE events.
+  // For history views (isLiveRun=false), agents stays empty until SSE events arrive.
   const showStream = isStreaming || streamData.agents.length > 0;
   
   // Combine DB state and Stream state smoothly
@@ -92,7 +97,7 @@ export default function Dashboard() {
           </div>
           
           <button 
-            onClick={() => { setSelectedId(null); resetStream(); form.reset(); }}
+            onClick={() => { setIsLiveRun(false); setSelectedId(null); resetStream(); form.reset(); }}
             className="mt-6 w-full flex items-center justify-center gap-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2.5 text-sm font-medium transition-colors"
           >
             <Plus className="h-4 w-4" /> New Analysis
@@ -109,7 +114,7 @@ export default function Dashboard() {
             analyses.map(item => (
               <button
                 key={item.id}
-                onClick={() => { setSelectedId(item.id); resetStream(); }}
+                onClick={() => { setIsLiveRun(false); setSelectedId(item.id); resetStream(); }}
                 className={cn(
                   "w-full text-left p-3 rounded-xl border transition-all duration-200 group",
                   selectedId === item.id 
