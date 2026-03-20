@@ -50,7 +50,7 @@ export default function Dashboard() {
     defaultValues: {
       ticker: "",
       date: format(new Date(), "yyyy-MM-dd"),
-      model: "minimax/minimax-m2.5",
+      model: "minimax/minimax-m2.5:nitro",
       maxDebateRounds: 1,
     }
   });

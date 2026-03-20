@@ -220,7 +220,7 @@ def run_analysis_thread(
 class AnalyzeRequest(BaseModel):
     ticker: str
     date: str
-    model: str = "minimax/minimax-m2.5"
+    model: str = "minimax/minimax-m2.5:nitro"
     max_debate_rounds: int = 1
 
 

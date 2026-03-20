@@ -229,7 +229,7 @@ router.post("/analyze", async (req, res): Promise<void> => {
   const result = await callPythonAgent("/agent/analyze", "POST", {
     ticker: ticker.toUpperCase(),
     date,
-    model: model ?? "minimax/minimax-m2.5",
+    model: model ?? "minimax/minimax-m2.5:nitro",
     max_debate_rounds: maxDebateRounds ?? 1,
   });
 
@@ -247,7 +247,7 @@ router.post("/analyze", async (req, res): Promise<void> => {
     .values({
       ticker: ticker.toUpperCase(),
       date,
-      model: model ?? "minimax/minimax-m2.5",
+      model: model ?? "minimax/minimax-m2.5:nitro",
       status: "running",
       jobId: job_id,
     })
