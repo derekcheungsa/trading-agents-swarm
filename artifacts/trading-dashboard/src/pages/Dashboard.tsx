@@ -39,6 +39,43 @@ const DEFAULT_CONSENSUS_MODELS: [string, string, string] = [
   "anthropic/claude-sonnet-4.6:nitro",
 ];
 
+// ---------------------------------------------------------------------------
+// Sidebar grouping: analyses from the same consensus run share the same
+// ticker+date and were created within 15 seconds of each other.
+// ---------------------------------------------------------------------------
+type AnalysisItem = { id: number; ticker: string; date: string; model: string; status: string; decision?: string | null; createdAt: string };
+type HistoryRow = { type: "single"; item: AnalysisItem } | { type: "consensus"; items: AnalysisItem[] };
+
+function groupAnalyses(list: AnalysisItem[]): HistoryRow[] {
+  const rows: HistoryRow[] = [];
+  const used = new Set<number>();
+
+  for (const item of list) {
+    if (used.has(item.id)) continue;
+    const t = new Date(item.createdAt).getTime();
+
+    const peers = list.filter(
+      (other) =>
+        !used.has(other.id) &&
+        other.id !== item.id &&
+        other.ticker === item.ticker &&
+        other.date === item.date &&
+        Math.abs(new Date(other.createdAt).getTime() - t) <= 15000
+    );
+
+    if (peers.length >= 1) {
+      const group = [item, ...peers];
+      group.forEach((a) => used.add(a.id));
+      rows.push({ type: "consensus", items: group });
+    } else {
+      used.add(item.id);
+      rows.push({ type: "single", item });
+    }
+  }
+
+  return rows;
+}
+
 export default function Dashboard() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [isLiveRun, setIsLiveRun] = useState(false);
@@ -146,6 +183,19 @@ export default function Dashboard() {
     form.reset();
   };
 
+  const handleGroupClick = (items: AnalysisItem[]) => {
+    const [a, b, c] = items;
+    setMode("consensus");
+    setIsLiveRun(false);
+    setSelectedId(null);
+    setConsensusIds([a.id, b?.id ?? a.id, c?.id ?? a.id]);
+    setConsensusModels([a.model, b?.model ?? a.model, c?.model ?? a.model] as [string, string, string]);
+    setConsensusTicker(a.ticker);
+    setConsensusDate(a.date);
+    resetStream();
+    resetAll();
+  };
+
   // Determine what to display for the active single-analysis view
   const isViewingHistory = !!selectedId && mode === "single";
   const isViewingConsensus = !!consensusIds && mode === "consensus";
@@ -192,26 +242,91 @@ export default function Dashboard() {
           ) : analyses.length === 0 ? (
             <div className="p-4 text-center text-sm text-muted-foreground border border-dashed rounded-lg">No analyses yet</div>
           ) : (
-            analyses.map(item => (
-              <button
-                key={item.id}
-                onClick={() => { setMode("single"); setIsLiveRun(false); setSelectedId(item.id); setConsensusIds(null); resetStream(); resetAll(); }}
-                className={cn(
-                  "w-full text-left p-3 rounded-xl border transition-all duration-200 group",
-                  selectedId === item.id && mode === "single"
-                    ? "bg-primary/10 border-primary/30"
-                    : "bg-transparent border-transparent hover:bg-white/5 hover:border-white/10"
-                )}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-mono font-bold text-lg">{item.ticker}</span>
-                  <StatusBadge status={item.status} decision={item.decision} />
-                </div>
-                <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1"><Calendar className="h-3 w-3" /> {item.date}</span>
-                </div>
-              </button>
-            ))
+            groupAnalyses(analyses as AnalysisItem[]).map((row, idx) => {
+              if (row.type === "single") {
+                const item = row.item;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => { setMode("single"); setIsLiveRun(false); setSelectedId(item.id); setConsensusIds(null); resetStream(); resetAll(); }}
+                    className={cn(
+                      "w-full text-left p-3 rounded-xl border transition-all duration-200",
+                      selectedId === item.id && mode === "single"
+                        ? "bg-primary/10 border-primary/30"
+                        : "bg-transparent border-transparent hover:bg-white/5 hover:border-white/10"
+                    )}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-mono font-bold text-lg">{item.ticker}</span>
+                      <StatusBadge status={item.status} decision={item.decision} />
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1"><Calendar className="h-3 w-3" /> {item.date}</span>
+                    </div>
+                  </button>
+                );
+              }
+
+              // Consensus group row
+              const { items } = row;
+              const isActive = mode === "consensus" && consensusIds !== null && consensusIds[0] === items[0].id;
+              const allDoneInGroup = items.every(i => i.status === "completed" || i.status === "error");
+              const anyRunning = items.some(i => i.status === "running");
+              return (
+                <button
+                  key={`group-${idx}`}
+                  onClick={() => handleGroupClick(items)}
+                  className={cn(
+                    "w-full text-left p-3 rounded-xl border transition-all duration-200",
+                    isActive
+                      ? "bg-primary/10 border-primary/30"
+                      : "bg-transparent border-transparent hover:bg-white/5 hover:border-white/10"
+                  )}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-mono font-bold text-lg">{items[0].ticker}</span>
+                    <span className={cn(
+                      "text-[10px] font-bold px-2 py-0.5 rounded-full border",
+                      anyRunning
+                        ? "border-primary/40 text-primary bg-primary/10"
+                        : "border-white/20 text-muted-foreground bg-white/5"
+                    )}>
+                      CONSENSUS
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground mb-2">
+                    <span className="flex items-center gap-1"><Calendar className="h-3 w-3" /> {items[0].date}</span>
+                    <span className="text-white/30">·</span>
+                    <span>{items.length} models</span>
+                  </div>
+                  {/* Decision dots per model */}
+                  <div className="flex items-center gap-1.5">
+                    {items.map((item) => {
+                      const d = item.decision?.toUpperCase();
+                      return (
+                        <span key={item.id} className={cn(
+                          "h-2 w-2 rounded-full shrink-0",
+                          item.status === "running" ? "bg-primary animate-pulse" :
+                          d === "BUY" ? "bg-success" :
+                          d === "SELL" ? "bg-destructive" :
+                          d === "HOLD" ? "bg-warning" :
+                          "bg-muted-foreground/30"
+                        )} title={d ?? item.status} />
+                      );
+                    })}
+                    {allDoneInGroup && (
+                      <span className="text-[10px] text-muted-foreground ml-1 font-mono">
+                        {(() => {
+                          const votes = { BUY: 0, SELL: 0, HOLD: 0 };
+                          items.forEach(i => { const d = i.decision?.toUpperCase() as keyof typeof votes; if (d && votes[d] !== undefined) votes[d]++; });
+                          return Object.entries(votes).filter(([,v]) => v > 0).map(([k,v]) => `${k} ${v}`).join(" · ");
+                        })()}
+                      </span>
+                    )}
+                  </div>
+                </button>
+              );
+            })
           )}
         </div>
       </aside>
