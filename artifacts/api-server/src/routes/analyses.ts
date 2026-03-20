@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { desc, eq } from "drizzle-orm";
 import http from "node:http";
-import { db, analysesTable } from "@workspace/db";
+import { db, analysesTable, analysisLogsTable } from "@workspace/db";
 import {
   CreateAnalysisBody,
   GetAnalysisParams,
@@ -27,13 +27,14 @@ interface JobCache {
   lines: string[];        // raw "data: {...}\n\n" lines, in order
   done: boolean;          // true once the Python stream has ended
   listeners: Set<(line: string) => void>;
+  sequence: number;       // monotonic counter for analysis_logs ordering
 }
 
 const jobCaches = new Map<string, JobCache>();
 
 function getOrCreateCache(jobId: string): JobCache {
   if (!jobCaches.has(jobId)) {
-    jobCaches.set(jobId, { lines: [], done: false, listeners: new Set() });
+    jobCaches.set(jobId, { lines: [], done: false, listeners: new Set(), sequence: 0 });
   }
   return jobCaches.get(jobId)!;
 }
@@ -64,6 +65,24 @@ function normalizeDecision(raw: unknown): string {
   const positions = (["BUY", "SELL", "HOLD"] as const).map((k) => ({ k, pos: upper.lastIndexOf(k) }));
   const best = positions.reduce((a, b) => (b.pos > a.pos ? b : a));
   return best.pos >= 0 ? best.k : "HOLD";
+}
+
+function saveEventToLog(
+  analysisId: number,
+  cache: JobCache,
+  event: Record<string, unknown>
+): void {
+  const seq = cache.sequence++;
+  db.insert(analysisLogsTable).values({
+    analysisId,
+    sequence: seq,
+    eventType: String(event.type ?? ""),
+    agent: typeof event.agent === "string" ? event.agent : null,
+    displayName: typeof event.displayName === "string" ? event.displayName : null,
+    status: typeof event.status === "string" ? event.status : null,
+    output: typeof event.output === "string" ? event.output : null,
+    message: typeof event.message === "string" ? event.message : null,
+  }).catch(console.error);
 }
 
 function updateDbFromEvent(
@@ -123,11 +142,13 @@ function startJobConsumer(analysisId: number, jobId: string): void {
             listener(sseBlock);
           }
 
-          // Update DB if needed
+          // Persist log + update DB if needed
           for (const rawLine of part.split("\n")) {
             if (rawLine.startsWith("data: ")) {
               try {
-                updateDbFromEvent(analysisId, JSON.parse(rawLine.slice(6)));
+                const event = JSON.parse(rawLine.slice(6));
+                saveEventToLog(analysisId, cache, event);
+                updateDbFromEvent(analysisId, event);
               } catch {}
             }
           }
@@ -306,6 +327,20 @@ router.get("/analyses/:id", async (req, res): Promise<void> => {
   }
 
   res.json(GetAnalysisResponse.parse(analysis));
+});
+
+router.get("/analyses/:id/logs", async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const logs = await db
+    .select()
+    .from(analysisLogsTable)
+    .where(eq(analysisLogsTable.analysisId, id))
+    .orderBy(analysisLogsTable.sequence);
+  res.json(logs);
 });
 
 router.get("/analyses/:id/stream", async (req, res): Promise<void> => {

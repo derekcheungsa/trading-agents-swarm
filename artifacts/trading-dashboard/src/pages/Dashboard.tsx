@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -11,7 +11,13 @@ import {
   getListAnalysesQueryKey,
   getGetAnalysisQueryKey,
 } from "@workspace/api-client-react";
-import { useAgentStream } from "@/hooks/use-agent-stream";
+import { useAgentStream, type AgentState } from "@/hooks/use-agent-stream";
+
+interface AnalysisLog {
+  id: number; analysisId: number; sequence: number;
+  eventType: string; agent: string | null; displayName: string | null;
+  status: string | null; output: string | null; message: string | null;
+}
 import { Badge, cn } from "@/components/Badge";
 import { AgentLog } from "@/components/AgentLog";
 import { DecisionCard } from "@/components/DecisionCard";
@@ -41,6 +47,31 @@ export default function Dashboard() {
 
   // SSE Stream hook — isLiveRun is true only when this is a freshly-started analysis
   const { streamData, resetStream, elapsedSeconds, completedCount } = useAgentStream(selectedId, isLiveRun);
+
+  // Persisted agent logs — fetched for completed/error analyses when live stream data is unavailable
+  const [persistedAgents, setPersistedAgents] = useState<AgentState[]>([]);
+  useEffect(() => {
+    if (!selectedId || isLiveRun) { setPersistedAgents([]); return; }
+    const status = analysisRecord?.status;
+    if (status !== "completed" && status !== "error") { setPersistedAgents([]); return; }
+    fetch(`/api/analyses/${selectedId}/logs`)
+      .then(r => r.json())
+      .then((logs: AnalysisLog[]) => {
+        const agentMap = new Map<string, AgentState>();
+        for (const log of logs) {
+          if (log.eventType === "agent_update" && log.agent) {
+            agentMap.set(log.agent, {
+              agent: log.agent,
+              displayName: log.displayName ?? log.agent,
+              status: (log.status as AgentState["status"]) ?? "completed",
+              output: log.output ?? "",
+            });
+          }
+        }
+        setPersistedAgents(Array.from(agentMap.values()));
+      })
+      .catch(console.error);
+  }, [selectedId, analysisRecord?.status, isLiveRun]);
 
   // Create Mutation
   const createMutation = useCreateAnalysis();
@@ -72,9 +103,8 @@ export default function Dashboard() {
   const activeRecord = analysisRecord;
   const isConnecting = streamData.status === "connecting";
   const isStreaming = streamData.status === "streaming" || isConnecting;
-  // Only show the agent panel when we have real agent data from SSE events.
-  // For history views (isLiveRun=false), agents stays empty until SSE events arrive.
-  const showStream = isStreaming || streamData.agents.length > 0;
+  const displayAgents = streamData.agents.length > 0 ? streamData.agents : persistedAgents;
+  const showStream = isStreaming || displayAgents.length > 0;
   
   // Combine DB state and Stream state smoothly
   const displayDecision = (streamData.decision || activeRecord?.decision) ?? null;
@@ -240,21 +270,14 @@ export default function Dashboard() {
                     <DecisionCard decision={displayDecision} reasoning={displayReasoning} />
                   )}
 
-                  {/* Agent Stream - shown if streaming or if we have stream data */}
+                  {/* Agent Stream - shown during live run or when persisted logs exist */}
                   {showStream && (
                     <AgentLog
-                      agents={streamData.agents}
+                      agents={displayAgents}
                       elapsedSeconds={elapsedSeconds}
                       completedCount={completedCount}
                       isConnecting={isConnecting}
                     />
-                  )}
-                  
-                  {/* Empty state for historical items that didn't record stream */}
-                  {displayStatus === "completed" && !showStream && (
-                     <div className="text-center p-8 border border-dashed rounded-xl text-muted-foreground bg-white/5">
-                       Agent execution logs are not retained in history for this record.
-                     </div>
                   )}
 
                   {/* Errors */}
