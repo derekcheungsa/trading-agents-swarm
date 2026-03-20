@@ -6,7 +6,7 @@ export const analysesTable = pgTable("analyses", {
   id: serial("id").primaryKey(),
   ticker: text("ticker").notNull(),
   date: text("date").notNull(),
-  model: text("model").notNull().default("minimax/minimax-m2.5:online"),
+  model: text("model").notNull().default("minimax/minimax-m2.5"),
   status: text("status").notNull().default("pending"),
   decision: text("decision"),
   reasoning: text("reasoning"),

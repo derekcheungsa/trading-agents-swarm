@@ -150,7 +150,7 @@ components:
         model:
           type: string
           description: OpenRouter model identifier
-          default: minimax/minimax-m2.5:online
+          default: minimax/minimax-m2.5
         maxDebateRounds:
           type: integer
           description: Number of debate rounds between bull/bear researchers

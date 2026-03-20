@@ -63,7 +63,7 @@ A multi-agent LLM financial trading framework exposed as a web app. Users enter 
 
 ### Default LLM Model
 
-`minimax/minimax-m2.5:online` (configurable per-analysis via the UI)
+`minimax/minimax-m2.5` (configurable per-analysis via the UI)
 
 ## TypeScript & Composite Projects
 

@@ -18,7 +18,7 @@ export const HealthCheckResponse = zod.object({
 /**
  * @summary Start a new trading analysis
  */
-export const createAnalysisBodyModelDefault = `minimax/minimax-m2.5:online`;
+export const createAnalysisBodyModelDefault = `minimax/minimax-m2.5`;
 export const createAnalysisBodyMaxDebateRoundsDefault = 1;
 
 export const CreateAnalysisBody = zod.object({
