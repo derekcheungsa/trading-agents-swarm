@@ -35,8 +35,8 @@ type FormValues = z.infer<typeof formSchema>;
 
 const DEFAULT_CONSENSUS_MODELS: [string, string, string] = [
   "minimax/minimax-m2.5:nitro",
-  "google/gemini-flash-1.5",
-  "meta-llama/llama-3.3-70b-instruct",
+  "google/gemini-3-flash-preview:nitro",
+  "anthropic/claude-sonnet-4.6:nitro",
 ];
 
 export default function Dashboard() {
