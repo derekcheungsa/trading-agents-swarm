@@ -43,8 +43,27 @@ function getOrCreateCache(jobId: string): JobCache {
 // ---------------------------------------------------------------------------
 function normalizeDecision(raw: unknown): string {
   const str = typeof raw === "string" ? raw : JSON.stringify(raw);
+
+  // Priority 1 — labeled patterns: "Recommendation: SELL", "Final Decision: BUY", etc.
+  // Take the LAST match so the conclusion wins over any prior bull/bear discussion.
+  const labeled = /\b(?:final\s+)?(?:recommendation|decision|action|proposal)\s*[:\-]\s*\*{0,2}(BUY|SELL|HOLD)\*{0,2}/gi;
+  let labeledMatch: RegExpExecArray | null;
+  let lastLabeled: string | null = null;
+  while ((labeledMatch = labeled.exec(str)) !== null) lastLabeled = labeledMatch[1].toUpperCase();
+  if (lastLabeled) return lastLabeled;
+
+  // Priority 2 — bold markdown: **SELL** / **BUY** — last occurrence wins
+  const bold = /\*{1,2}(BUY|SELL|HOLD)\*{1,2}/gi;
+  let boldMatch: RegExpExecArray | null;
+  let lastBold: string | null = null;
+  while ((boldMatch = bold.exec(str)) !== null) lastBold = boldMatch[1].toUpperCase();
+  if (lastBold) return lastBold;
+
+  // Priority 3 — last bare keyword occurrence
   const upper = str.toUpperCase();
-  return upper.includes("BUY") ? "BUY" : upper.includes("SELL") ? "SELL" : "HOLD";
+  const positions = (["BUY", "SELL", "HOLD"] as const).map((k) => ({ k, pos: upper.lastIndexOf(k) }));
+  const best = positions.reduce((a, b) => (b.pos > a.pos ? b : a));
+  return best.pos >= 0 ? best.k : "HOLD";
 }
 
 function updateDbFromEvent(

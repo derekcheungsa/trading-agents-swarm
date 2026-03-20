@@ -68,14 +68,39 @@ def _extract_node_output(updates: dict[str, Any]) -> str:
 
 
 def _parse_decision(raw_decision: str) -> tuple[str, str]:
-    """Extract BUY/SELL/HOLD action from the raw final_trade_decision text."""
+    """Extract BUY/SELL/HOLD from the final trade decision text.
+
+    Priority order (highest wins):
+    1. Labeled patterns: "Recommendation: SELL", "Final Decision: BUY", etc.
+       Takes the LAST match so the concluding line wins over prior discussion.
+    2. Bold markdown: **SELL** / **BUY** — takes the last occurrence.
+    3. Last bare keyword in the text (avoids false positives from bull/bear discussion).
+    """
+    import re
+
+    # Priority 1 — labeled recommendation / decision / action / proposal
+    labeled = re.compile(
+        r'\b(?:final\s+)?(?:recommendation|decision|action|proposal)\s*[:\-]\s*\*{0,2}(BUY|SELL|HOLD)\*{0,2}',
+        re.IGNORECASE,
+    )
+    labeled_matches = list(labeled.finditer(raw_decision))
+    if labeled_matches:
+        return labeled_matches[-1].group(1).upper(), raw_decision
+
+    # Priority 2 — bold markdown keyword (**BUY** / **SELL** / **HOLD**)
+    bold = re.compile(r'\*{1,2}(BUY|SELL|HOLD)\*{1,2}', re.IGNORECASE)
+    bold_matches = list(bold.finditer(raw_decision))
+    if bold_matches:
+        return bold_matches[-1].group(1).upper(), raw_decision
+
+    # Priority 3 — last bare keyword occurrence
     upper = raw_decision.upper()
-    if "BUY" in upper:
-        action = "BUY"
-    elif "SELL" in upper:
-        action = "SELL"
-    else:
-        action = "HOLD"
+    last_pos, action = -1, "HOLD"
+    for keyword in ("BUY", "SELL", "HOLD"):
+        pos = upper.rfind(keyword)
+        if pos > last_pos:
+            last_pos, action = pos, keyword
+
     return action, raw_decision
 
 
