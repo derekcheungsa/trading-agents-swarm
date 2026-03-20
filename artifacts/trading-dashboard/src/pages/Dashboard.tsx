@@ -34,9 +34,9 @@ const formSchema = z.object({
 type FormValues = z.infer<typeof formSchema>;
 
 const DEFAULT_CONSENSUS_MODELS: [string, string, string] = [
-  "openai/gpt-5.4-mini:nitro",
+  "openai/gpt-5.4:nitro",
   "z-ai/glm-5:nitro",
-  "minimax/minimax-m2.7:nitro",
+  "google/gemini-3.1-pro-preview",
 ];
 
 // ---------------------------------------------------------------------------
