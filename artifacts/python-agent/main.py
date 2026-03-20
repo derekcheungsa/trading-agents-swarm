@@ -104,6 +104,11 @@ def run_analysis_thread(
         if openrouter_key:
             os.environ["OPENAI_API_KEY"] = openrouter_key
 
+        # Cap each individual LLM API call at 3 minutes.
+        # Without this the openai SDK default is 600 s, meaning a single
+        # hung call can silently block the analysis thread for 10 minutes.
+        os.environ.setdefault("OPENAI_TIMEOUT", "180")
+
         # Use debug=False — structured node events come from stream_mode="updates" instead.
         ta = TradingAgentsGraph(debug=False, config=config)
 
