@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { TrendingUp, TrendingDown, Minus, BrainCircuit } from "lucide-react";
 import { cn } from "./Badge";
+import { MarkdownContent } from "./MarkdownContent";
 
 interface DecisionCardProps {
   decision: string | null;
@@ -65,9 +66,10 @@ export function DecisionCard({ decision, reasoning }: DecisionCardProps) {
               <BrainCircuit className="h-4 w-4" />
               <span className="text-sm font-semibold uppercase tracking-wider">Agent Consensus Reasoning</span>
             </div>
-            <p className="text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap font-sans">
-              {reasoning || "No reasoning provided."}
-            </p>
+            {reasoning
+              ? <MarkdownContent content={reasoning} />
+              : <p className="text-sm text-muted-foreground">No reasoning provided.</p>
+            }
           </div>
         </div>
       </div>

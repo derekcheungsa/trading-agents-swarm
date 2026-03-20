@@ -3,6 +3,7 @@ import { CheckCircle2, CircleDashed, Loader2, ChevronDown, Clock, Zap } from "lu
 import { useState } from "react";
 import { AgentState } from "@/hooks/use-agent-stream";
 import { cn } from "./Badge";
+import { MarkdownContent } from "./MarkdownContent";
 
 const AGENT_DESCRIPTIONS: Record<string, string> = {
   fundamentals_analyst: "Reads SEC filings, earnings, and financial ratios",
@@ -244,10 +245,8 @@ function AgentRow({ agent }: { agent: AgentState }) {
             transition={{ duration: 0.2 }}
             className="border-t border-white/5 bg-black/50"
           >
-            <div className="p-4">
-              <pre className="font-mono text-xs text-muted-foreground/80 whitespace-pre-wrap overflow-x-auto leading-relaxed max-h-64 overflow-y-auto">
-                {agent.output}
-              </pre>
+            <div className="p-4 max-h-80 overflow-y-auto">
+              <MarkdownContent content={agent.output} />
             </div>
           </motion.div>
         )}
