@@ -9,9 +9,9 @@ import { cn } from "./Badge";
 type StreamInstance = ReturnType<typeof useAgentStream>;
 
 interface ConsensusViewProps {
-  streams: readonly [StreamInstance, StreamInstance, StreamInstance];
+  streams: readonly [StreamInstance, StreamInstance, StreamInstance, StreamInstance];
   consensus: ConsensusResult;
-  models: [string, string, string];
+  models: [string, string, string, string];
   ticker: string;
   date: string;
 }
@@ -61,7 +61,7 @@ export function ConsensusView({ streams, consensus, models, ticker, date }: Cons
       <ConsensusBanner consensus={consensus} ticker={ticker} date={date} />
 
       <Tabs defaultValue="0" className="w-full">
-        <TabsList className="w-full grid grid-cols-3 h-auto p-1 bg-card/50 border border-border rounded-xl">
+        <TabsList className="w-full grid grid-cols-4 h-auto p-1 bg-card/50 border border-border rounded-xl">
           {models.map((model, i) => (
             <TabsTrigger
               key={i}
