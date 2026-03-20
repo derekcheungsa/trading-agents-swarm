@@ -12,6 +12,8 @@ import {
   getGetAnalysisQueryKey,
 } from "@workspace/api-client-react";
 import { useAgentStream, type AgentState } from "@/hooks/use-agent-stream";
+import { useConsensusStream } from "@/hooks/use-consensus-stream";
+import { ConsensusView } from "@/components/ConsensusView";
 
 interface AnalysisLog {
   id: number; analysisId: number; sequence: number;
@@ -31,9 +33,23 @@ const formSchema = z.object({
 
 type FormValues = z.infer<typeof formSchema>;
 
+const DEFAULT_CONSENSUS_MODELS: [string, string, string] = [
+  "minimax/minimax-m2.5:nitro",
+  "google/gemini-flash-1.5",
+  "meta-llama/llama-3.3-70b-instruct",
+];
+
 export default function Dashboard() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [isLiveRun, setIsLiveRun] = useState(false);
+
+  // Consensus mode state
+  const [mode, setMode] = useState<"single" | "consensus">("single");
+  const [consensusIds, setConsensusIds] = useState<[number, number, number] | null>(null);
+  const [consensusModels, setConsensusModels] = useState<[string, string, string]>(DEFAULT_CONSENSUS_MODELS);
+  // Track ticker/date for the consensus header (form values at submit time)
+  const [consensusTicker, setConsensusTicker] = useState("");
+  const [consensusDate, setConsensusDate] = useState("");
 
   // Fetch History (polls every 30s)
   const { data: analyses = [], isLoading: isLoadingHistory } = useListAnalyses({
@@ -45,13 +61,19 @@ export default function Dashboard() {
     query: { queryKey: getGetAnalysisQueryKey(selectedId!), enabled: !!selectedId }
   });
 
-  // SSE Stream hook — isLiveRun is true only when this is a freshly-started analysis
-  const { streamData, resetStream, elapsedSeconds, completedCount } = useAgentStream(selectedId, isLiveRun);
+  // Single-analysis SSE stream hook
+  const { streamData, resetStream, elapsedSeconds, completedCount } = useAgentStream(selectedId, isLiveRun && mode === "single");
+
+  // Consensus SSE stream hooks (always called — React rules require unconditional hooks)
+  const { streams, consensus, resetAll } = useConsensusStream(
+    consensusIds ?? [null, null, null],
+    isLiveRun && mode === "consensus"
+  );
 
   // Persisted agent logs — fetched for completed/error analyses when live stream data is unavailable
   const [persistedAgents, setPersistedAgents] = useState<AgentState[]>([]);
   useEffect(() => {
-    if (!selectedId || isLiveRun) { setPersistedAgents([]); return; }
+    if (!selectedId || isLiveRun || mode === "consensus") { setPersistedAgents([]); return; }
     const status = analysisRecord?.status;
     if (status !== "completed" && status !== "error") { setPersistedAgents([]); return; }
     fetch(`/api/analyses/${selectedId}/logs`)
@@ -71,7 +93,7 @@ export default function Dashboard() {
         setPersistedAgents(Array.from(agentMap.values()));
       })
       .catch(console.error);
-  }, [selectedId, analysisRecord?.status, isLiveRun]);
+  }, [selectedId, analysisRecord?.status, isLiveRun, mode]);
 
   // Create Mutation
   const createMutation = useCreateAnalysis();
@@ -88,28 +110,57 @@ export default function Dashboard() {
 
   const onSubmit = async (data: FormValues) => {
     resetStream();
+    resetAll();
     setIsLiveRun(false);
+    setSelectedId(null);
+    setConsensusIds(null);
+
     try {
-      const result = await createMutation.mutateAsync({ data });
-      setIsLiveRun(true);
-      setSelectedId(result.id);
+      if (mode === "consensus") {
+        setConsensusTicker(data.ticker);
+        setConsensusDate(data.date);
+        const [r1, r2, r3] = await Promise.all(
+          consensusModels.map((model) =>
+            createMutation.mutateAsync({ data: { ...data, model } })
+          )
+        );
+        setIsLiveRun(true);
+        setConsensusIds([r1.id, r2.id, r3.id]);
+      } else {
+        const result = await createMutation.mutateAsync({ data });
+        setIsLiveRun(true);
+        setSelectedId(result.id);
+      }
     } catch (err) {
       console.error("Failed to start analysis", err);
     }
   };
 
-  // Determine what to display for the active view
-  const isViewingHistory = !!selectedId;
+  const handleNewAnalysis = () => {
+    setMode("single");
+    setIsLiveRun(false);
+    setSelectedId(null);
+    setConsensusIds(null);
+    resetStream();
+    resetAll();
+    form.reset();
+  };
+
+  // Determine what to display for the active single-analysis view
+  const isViewingHistory = !!selectedId && mode === "single";
+  const isViewingConsensus = !!consensusIds && mode === "consensus";
   const activeRecord = analysisRecord;
   const isConnecting = streamData.status === "connecting";
   const isStreaming = streamData.status === "streaming" || isConnecting;
   const displayAgents = streamData.agents.length > 0 ? streamData.agents : persistedAgents;
   const showStream = isStreaming || displayAgents.length > 0;
-  
+
   // Combine DB state and Stream state smoothly
   const displayDecision = (streamData.decision || activeRecord?.decision) ?? null;
   const displayReasoning = (streamData.reasoning || activeRecord?.reasoning) ?? null;
   const displayStatus = isStreaming ? "running" : (activeRecord?.status || "pending");
+
+  const showForm = !isViewingHistory && !isViewingConsensus;
 
   return (
     <div className="flex h-screen w-full bg-background overflow-hidden text-foreground">
@@ -125,15 +176,15 @@ export default function Dashboard() {
               <p className="text-xs text-muted-foreground font-mono mt-1">AI Swarm Terminal</p>
             </div>
           </div>
-          
-          <button 
-            onClick={() => { setIsLiveRun(false); setSelectedId(null); resetStream(); form.reset(); }}
+
+          <button
+            onClick={handleNewAnalysis}
             className="mt-6 w-full flex items-center justify-center gap-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2.5 text-sm font-medium transition-colors"
           >
             <Plus className="h-4 w-4" /> New Analysis
           </button>
         </div>
-        
+
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
           <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4 px-2">History</h3>
           {isLoadingHistory ? (
@@ -144,11 +195,11 @@ export default function Dashboard() {
             analyses.map(item => (
               <button
                 key={item.id}
-                onClick={() => { setIsLiveRun(false); setSelectedId(item.id); resetStream(); }}
+                onClick={() => { setMode("single"); setIsLiveRun(false); setSelectedId(item.id); setConsensusIds(null); resetStream(); resetAll(); }}
                 className={cn(
                   "w-full text-left p-3 rounded-xl border transition-all duration-200 group",
-                  selectedId === item.id 
-                    ? "bg-primary/10 border-primary/30" 
+                  selectedId === item.id && mode === "single"
+                    ? "bg-primary/10 border-primary/30"
                     : "bg-transparent border-transparent hover:bg-white/5 hover:border-white/10"
                 )}
               >
@@ -168,8 +219,9 @@ export default function Dashboard() {
       {/* Main Content */}
       <main className="flex-1 relative overflow-y-auto">
         <div className="max-w-4xl mx-auto p-8 lg:p-12 min-h-full flex flex-col">
-          
-          {!isViewingHistory ? (
+
+          {/* ── Form (new analysis) ── */}
+          {showForm && (
             <div className="flex-1 flex flex-col justify-center max-w-2xl mx-auto w-full animate-in fade-in slide-in-from-bottom-4 duration-500">
               <div className="mb-8">
                 <h2 className="text-3xl font-display font-bold">Deploy Agent Swarm</h2>
@@ -177,24 +229,48 @@ export default function Dashboard() {
               </div>
 
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6 glass-panel p-8 rounded-2xl">
+                {/* Mode toggle */}
+                <div className="flex rounded-xl border border-border overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setMode("single")}
+                    className={cn(
+                      "flex-1 py-2.5 text-sm font-medium transition-colors",
+                      mode === "single" ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    Single Model
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMode("consensus")}
+                    className={cn(
+                      "flex-1 py-2.5 text-sm font-medium transition-colors border-l border-border",
+                      mode === "consensus" ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    Consensus (3 Models)
+                  </button>
+                </div>
+
                 <div className="grid grid-cols-2 gap-6">
                   <div className="space-y-2">
                     <label className="text-sm font-medium flex items-center gap-2">
                       <Search className="h-4 w-4 text-muted-foreground" /> Asset Ticker
                     </label>
-                    <input 
+                    <input
                       {...form.register("ticker")}
                       placeholder="e.g. NVDA"
                       className="w-full bg-input border border-border rounded-xl px-4 py-3 font-mono text-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all uppercase placeholder:text-muted-foreground"
                     />
                     {form.formState.errors.ticker && <p className="text-destructive text-xs">{form.formState.errors.ticker.message}</p>}
                   </div>
-                  
+
                   <div className="space-y-2">
                     <label className="text-sm font-medium flex items-center gap-2">
                       <Calendar className="h-4 w-4 text-muted-foreground" /> Target Date
                     </label>
-                    <input 
+                    <input
                       type="date"
                       {...form.register("date")}
                       className="w-full bg-input border border-border rounded-xl px-4 py-3 font-mono text-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
@@ -205,12 +281,31 @@ export default function Dashboard() {
 
                 <div className="space-y-2">
                   <label className="text-sm font-medium flex items-center gap-2">
-                    <Cpu className="h-4 w-4 text-muted-foreground" /> LLM Core (OpenRouter)
+                    <Cpu className="h-4 w-4 text-muted-foreground" />
+                    {mode === "consensus" ? "LLM Models (OpenRouter)" : "LLM Core (OpenRouter)"}
                   </label>
-                  <input 
-                    {...form.register("model")}
-                    className="w-full bg-input border border-border rounded-xl px-4 py-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
-                  />
+                  {mode === "single" ? (
+                    <input
+                      {...form.register("model")}
+                      className="w-full bg-input border border-border rounded-xl px-4 py-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                    />
+                  ) : (
+                    <div className="space-y-2">
+                      {([0, 1, 2] as const).map((i) => (
+                        <input
+                          key={i}
+                          value={consensusModels[i]}
+                          onChange={(e) => setConsensusModels((prev) => {
+                            const next = [...prev] as [string, string, string];
+                            next[i] = e.target.value;
+                            return next;
+                          })}
+                          placeholder={`Model ${i + 1}`}
+                          className="w-full bg-input border border-border rounded-xl px-4 py-2.5 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -218,7 +313,7 @@ export default function Dashboard() {
                     <Layers className="h-4 w-4 text-muted-foreground" /> Debate Rounds
                   </label>
                   <div className="flex items-center gap-4">
-                    <input 
+                    <input
                       type="range"
                       min="1" max="5"
                       {...form.register("maxDebateRounds")}
@@ -228,16 +323,32 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   disabled={createMutation.isPending}
                   className="w-full mt-4 bg-primary hover:bg-primary/90 text-primary-foreground font-bold py-4 rounded-xl shadow-[0_0_20px_rgba(0,255,255,0.3)] transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {createMutation.isPending ? "Initializing Swarm..." : "Execute Analysis"}
+                  {createMutation.isPending
+                    ? "Initializing Swarm..."
+                    : mode === "consensus" ? "Execute Consensus Analysis" : "Execute Analysis"}
                 </button>
               </form>
             </div>
-          ) : (
+          )}
+
+          {/* ── Consensus results ── */}
+          {isViewingConsensus && (
+            <ConsensusView
+              streams={streams}
+              consensus={consensus}
+              models={consensusModels}
+              ticker={consensusTicker}
+              date={consensusDate}
+            />
+          )}
+
+          {/* ── Single-analysis results ── */}
+          {isViewingHistory && (
             <div className="space-y-12 animate-in fade-in duration-500">
               {/* Header */}
               <div className="flex items-end justify-between border-b border-border pb-6">
@@ -265,12 +376,10 @@ export default function Dashboard() {
                 </div>
               ) : (
                 <div className="grid gap-12">
-                  {/* Decision Card - shown if complete */}
                   {(displayStatus === "completed" && displayDecision) && (
                     <DecisionCard decision={displayDecision} reasoning={displayReasoning} />
                   )}
 
-                  {/* Agent Stream - shown during live run or when persisted logs exist */}
                   {showStream && (
                     <AgentLog
                       agents={displayAgents}
@@ -280,7 +389,6 @@ export default function Dashboard() {
                     />
                   )}
 
-                  {/* Errors */}
                   {(streamData.error || activeRecord?.errorMessage) && (
                     <div className="p-6 bg-destructive/10 border border-destructive/30 rounded-xl text-destructive">
                       <h4 className="font-bold mb-2">Analysis Error</h4>
@@ -301,14 +409,14 @@ function StatusBadge({ status, decision, size = "sm" }: { status: string, decisi
   if (status === "completed" && decision) {
     const isBuy = decision.toUpperCase().includes("BUY");
     const isSell = decision.toUpperCase().includes("SELL");
-    
+
     return (
       <Badge variant={isBuy ? "success" : isSell ? "destructive" : "warning"} className={size === "lg" ? "text-sm px-4 py-1.5" : ""}>
         {decision}
       </Badge>
     );
   }
-  
+
   if (status === "running") {
     return (
       <Badge variant="outline" className={cn("border-primary text-primary bg-primary/10", size === "lg" ? "text-sm px-4 py-1.5" : "")}>
