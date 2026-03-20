@@ -251,7 +251,7 @@ async def stream_job(job_id: str) -> StreamingResponse:
 
         while True:
             try:
-                event = await loop.run_in_executor(None, lambda: q.get(timeout=120))
+                event = await loop.run_in_executor(None, lambda: q.get(timeout=20))
                 if event is None:
                     yield f"data: {json.dumps({'type': 'done'})}\n\n"
                     break

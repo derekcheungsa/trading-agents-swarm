@@ -360,6 +360,7 @@ router.get("/analyses/:id/stream", async (req, res): Promise<void> => {
   const listener = (sseBlock: string) => {
     if (sseBlock === "") {
       // sentinel: stream ended
+      clearInterval(heartbeat);
       res.end();
     } else {
       res.write(sseBlock);
@@ -368,7 +369,15 @@ router.get("/analyses/:id/stream", async (req, res): Promise<void> => {
 
   cache.listeners.add(listener);
 
+  // Keep the browser → proxy → Express connection alive.
+  // Production reverse proxies cut idle SSE connections after ~60s.
+  // Send an SSE comment (invisible to the client) every 25 seconds.
+  const heartbeat = setInterval(() => {
+    res.write(": ping\n\n");
+  }, 25_000);
+
   req.on("close", () => {
+    clearInterval(heartbeat);
     cache.listeners.delete(listener);
   });
 });
