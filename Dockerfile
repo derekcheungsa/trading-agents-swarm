@@ -24,8 +24,8 @@ RUN pnpm install --frozen-lockfile
 # Pre-install Python dependencies (avoids slow cold-start pip install)
 RUN pip install --break-system-packages -r artifacts/python-agent/requirements.txt
 
-# Build TypeScript + Vite frontend
-RUN pnpm run build
+# Build TypeScript + Vite frontend (exclude mockup-sandbox which is Replit-only)
+RUN pnpm --filter "!./artifacts/mockup-sandbox" -r run build
 
 EXPOSE 8080
 
