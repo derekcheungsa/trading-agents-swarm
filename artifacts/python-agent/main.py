@@ -59,12 +59,11 @@ def _extract_node_output(updates: dict[str, Any]) -> str:
     if messages:
         last = messages[-1]
         if hasattr(last, "content") and last.content:
-            content = str(last.content)
-            return content[:3000]
+            return str(last.content)
     for field in ("investment_plan", "final_trade_decision", "risk_debate_state"):
         val = updates.get(field)
         if val:
-            return str(val)[:3000]
+            return str(val)
     return ""
 
 
