@@ -11,10 +11,11 @@ A web-based trading analysis platform built on top of [TauricResearch/TradingAge
 | Persistence | None | PostgreSQL (Drizzle ORM) |
 | Deployment | Local only | Railway (Docker) |
 | Real-time updates | None | Server-Sent Events |
+| Consensus mode | None | 4-model parallel analysis with vote tally |
 
 ## How It Works
 
-Enter a stock ticker and date. Nine AI agents run in parallel and stream their analysis in real-time. A final BUY / HOLD / SELL decision is returned with full reasoning.
+Enter a stock ticker and date. Nine AI agents run in parallel and stream their analysis in real-time. A final BUY / HOLD / SELL decision is returned with full reasoning. In **Consensus mode**, run 4 different LLMs simultaneously and see if they agree.
 
 ```
 Browser → Express API (Node.js) → FastAPI Agent Service (Python)
@@ -28,41 +29,24 @@ Browser → Express API (Node.js) → FastAPI Agent Service (Python)
 
 ## Deploy to Railway
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template)
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template?template=https://github.com/derekcheungsa/trading-agents-swarm)
 
-### Manual Deploy
-
-1. Fork this repo
-2. Create a new Railway project and connect your fork
-3. Add a **PostgreSQL** database plugin
-4. Set environment variables:
+### Required Environment Variables
 
 | Variable | Description |
 |---|---|
-| `OPENROUTER_API_KEY` | OpenRouter API key (used as the LLM provider) |
-| `FINANCIAL_MODELING_PREP_API_KEY` | FMP API key for financial data |
-| `DATABASE_URL` | Set to `${{Postgres.DATABASE_URL}}` to reference the Postgres plugin |
-| `NODE_ENV` | `production` |
+| `OPENROUTER_API_KEY` | OpenRouter API key — used for all LLM calls. Get one at [openrouter.ai/keys](https://openrouter.ai/keys) |
+| `DATABASE_URL` | PostgreSQL connection string. On Railway, add a Postgres plugin and set this to `${{Postgres.DATABASE_URL}}` |
+| `FINANCIAL_MODELING_PREP_API_KEY` | FMP API key for financial data. Get one at [financialmodelingprep.com](https://financialmodelingprep.com/developer/docs) |
 
-5. Railway detects the `Dockerfile` and `railway.json` automatically — just deploy.
+### Setup Steps
 
-After first deploy, create the database schema:
+1. Click the **Deploy on Railway** button above
+2. Add a **PostgreSQL** database plugin in the Railway dashboard
+3. Set `OPENROUTER_API_KEY`, `DATABASE_URL` (`${{Postgres.DATABASE_URL}}`), and `FINANCIAL_MODELING_PREP_API_KEY`
+4. Railway detects the `Dockerfile` automatically — the build starts on first deploy
 
-```bash
-# Get the public Postgres URL from Railway dashboard, then:
-node -e "
-const { Pool } = require('pg');
-const pool = new Pool({ connectionString: 'YOUR_DATABASE_PUBLIC_URL' });
-pool.query(\`CREATE TABLE IF NOT EXISTS analyses (
-  id SERIAL PRIMARY KEY, ticker TEXT NOT NULL, date TEXT NOT NULL,
-  model TEXT NOT NULL DEFAULT 'minimax/minimax-m2.5:nitro',
-  status TEXT NOT NULL DEFAULT 'pending', decision TEXT, reasoning TEXT,
-  job_id TEXT NOT NULL, error_message TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-)\`).then(() => { console.log('Done'); pool.end(); });
-"
-```
+> **Database schema** is pushed automatically on first startup via Drizzle.
 
 ## Local Development
 
@@ -85,10 +69,8 @@ pnpm install
 # Install Python deps
 pip install -r artifacts/python-agent/requirements.txt
 
-# Set environment variables
-export DATABASE_URL=postgresql://localhost/trading_agents
-export OPENROUTER_API_KEY=sk-or-...
-export FINANCIAL_MODELING_PREP_API_KEY=...
+# Copy and fill in env vars
+cp .env.example .env
 
 # Push DB schema
 pnpm --filter @workspace/db run push
@@ -113,6 +95,7 @@ Open [http://localhost:8080](http://localhost:8080).
 │   └── api-client-react/    # Generated React Query hooks
 ├── Dockerfile               # Single-stage Node 24 + Python 3.12 image
 ├── railway.json             # Railway deployment config
+├── .env.example             # Required environment variables
 └── production-start.sh      # Starts Python agent + Express in sequence
 ```
 
@@ -125,14 +108,13 @@ Open [http://localhost:8080](http://localhost:8080).
 | `GET` | `/api/analyses` | List all analyses |
 | `GET` | `/api/analyses/:id` | Get a single analysis |
 | `GET` | `/api/analyses/:id/stream` | SSE stream of agent progress |
+| `GET` | `/api/analyses/:id/logs` | Persisted agent log events |
 
 ## Models
 
-The default LLM model is `minimax/minimax-m2.5:nitro` via OpenRouter. Any OpenRouter-compatible model can be specified per-analysis through the UI.
+Any [OpenRouter](https://openrouter.ai/models)-compatible model can be specified per-analysis through the UI. Default single-model: `minimax/minimax-m2.5:nitro`. Default consensus set (4 models): `openai/gpt-5.4:nitro`, `z-ai/glm-5:nitro`, `google/gemini-3.1-pro-preview`, `minimax/minimax-m2.7:nitro`.
 
 ## Roadmap
-
-This is the foundation for building additional capabilities on top of TradingAgents. Planned directions:
 
 - [ ] Portfolio-level analysis (multiple tickers)
 - [ ] Scheduled/recurring analyses

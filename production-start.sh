@@ -3,6 +3,10 @@ set -e
 
 echo "=== TradingAgents Production Startup ==="
 
+# Push DB schema (idempotent — creates tables if missing, no-ops if up to date)
+echo "Pushing database schema..."
+pnpm --filter @workspace/db run push-force || echo "Warning: DB schema push failed (continuing)"
+
 # Python agent always runs on port 8000 internally
 export PYTHON_AGENT_PORT=8000
 # Express listens on the port the artifact system expects
