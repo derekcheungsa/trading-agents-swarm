@@ -282,16 +282,24 @@ router.post("/analyze", async (req, res): Promise<void> => {
 
   const { job_id } = result.data as { job_id: string };
 
-  const [analysis] = await db
-    .insert(analysesTable)
-    .values({
-      ticker: ticker.toUpperCase(),
-      date,
-      model: model ?? "minimax/minimax-m2.5:nitro",
-      status: "running",
-      jobId: job_id,
-    })
-    .returning();
+  let analysis: typeof analysesTable.$inferSelect;
+  try {
+    const [row] = await db
+      .insert(analysesTable)
+      .values({
+        ticker: ticker.toUpperCase(),
+        date,
+        model: model ?? "minimax/minimax-m2.5:nitro",
+        status: "running",
+        jobId: job_id,
+      })
+      .returning();
+    analysis = row;
+  } catch (dbErr) {
+    console.error("DB insert failed:", dbErr);
+    res.status(503).json({ error: "Database unavailable. Ensure DATABASE_URL is set and the Postgres service is running." });
+    return;
+  }
 
   // Start the single fan-out consumer. It buffers every event so frontend
   // clients can connect at any time and still receive the full stream.
