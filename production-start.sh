@@ -3,16 +3,18 @@ set -e
 
 echo "=== TradingAgents Production Startup ==="
 
-# Push DB schema with retries — Postgres may need time to become available on cold starts
-echo "Pushing database schema..."
-for attempt in 1 2 3 4 5; do
-  if timeout 30 pnpm --filter @workspace/db run push-force 2>&1; then
-    echo "DB schema push succeeded on attempt ${attempt}."
-    break
-  fi
-  echo "Warning: DB schema push attempt ${attempt} failed. Retrying in 10s..."
-  sleep 10
-done
+# Push DB schema in background — don't block Express startup
+# Postgres may need time to become available on cold starts
+(
+  for attempt in 1 2 3 4 5; do
+    if timeout 25 pnpm --filter @workspace/db run push-force 2>&1; then
+      echo "DB schema push succeeded on attempt ${attempt}."
+      break
+    fi
+    echo "Warning: DB schema push attempt ${attempt} failed. Retrying in 10s..."
+    sleep 10
+  done
+) &
 
 # Python agent always runs on port 8000 internally
 export PYTHON_AGENT_PORT=8000
