@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 
 export interface ConsensusSummaryState {
   status: "idle" | "loading" | "done" | "error";
@@ -8,30 +8,23 @@ export interface ConsensusSummaryState {
 
 export function useConsensusSummary(
   ids: [number | null, number | null, number | null, number | null],
-  isCompleted: boolean,
   ticker: string,
   date: string,
   models: [string, string, string, string]
-): { state: ConsensusSummaryState; regenerate: () => void } {
+): { state: ConsensusSummaryState; generate: () => void } {
   const [state, setState] = useState<ConsensusSummaryState>({ status: "idle", summary: "" });
-  const fetchedForRef = useRef<string>("");
 
   const key = ids.join(",");
 
   // Reset when IDs change (new consensus run)
   useEffect(() => {
-    if (fetchedForRef.current !== key) {
-      setState({ status: "idle", summary: "" });
-      fetchedForRef.current = "";
-    }
+    setState({ status: "idle", summary: "" });
   }, [key]);
 
-  const run = () => {
-    if (!isCompleted) return;
+  const generate = () => {
     if (ids.some((id) => id === null)) return;
 
     setState({ status: "loading", summary: "" });
-    fetchedForRef.current = key;
 
     fetch("/api/analyses/consensus-summary", {
       method: "POST",
@@ -43,7 +36,7 @@ export function useConsensusSummary(
         if (data.error) {
           setState({ status: "error", summary: "", error: data.error });
         } else {
-          setState({ status: "done", summary: data.summary });
+          setState({ status: "done", summary: data.summary || "(No summary returned)" });
         }
       })
       .catch((err) => {
@@ -51,12 +44,5 @@ export function useConsensusSummary(
       });
   };
 
-  // Auto-trigger when first completed
-  useEffect(() => {
-    if (isCompleted && fetchedForRef.current !== key && !ids.some((id) => id === null)) {
-      run();
-    }
-  }, [isCompleted, key]);
-
-  return { state, regenerate: run };
+  return { state, generate };
 }

@@ -461,7 +461,6 @@ export default function Dashboard() {
               ids={consensusIds ?? [null, null, null, null]}
               ticker={consensusTicker}
               date={consensusDate}
-              isLiveRun={isLiveRun}
             />
           )}
 

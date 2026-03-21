@@ -1,14 +1,14 @@
 import { motion } from "framer-motion";
-import { BrainCircuit, RefreshCw } from "lucide-react";
+import { BrainCircuit, RefreshCw, Sparkles } from "lucide-react";
 import { MarkdownContent } from "./MarkdownContent";
 import { type ConsensusSummaryState } from "@/hooks/use-consensus-summary";
 
 interface ConsensusSummaryCardProps {
   state: ConsensusSummaryState;
-  onRegenerate: () => void;
+  onGenerate: () => void;
 }
 
-export function ConsensusSummaryCard({ state, onRegenerate }: ConsensusSummaryCardProps) {
+export function ConsensusSummaryCard({ state, onGenerate }: ConsensusSummaryCardProps) {
   return (
     <div className="glass-panel rounded-2xl p-8">
       {/* Header */}
@@ -24,7 +24,7 @@ export function ConsensusSummaryCard({ state, onRegenerate }: ConsensusSummaryCa
         </div>
         {state.status === "done" && (
           <button
-            onClick={onRegenerate}
+            onClick={onGenerate}
             className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors font-mono px-3 py-1.5 rounded-lg border border-border hover:border-foreground/20"
           >
             <RefreshCw className="h-3 w-3" />
@@ -32,6 +32,22 @@ export function ConsensusSummaryCard({ state, onRegenerate }: ConsensusSummaryCa
           </button>
         )}
       </div>
+
+      {/* Idle — show generate CTA */}
+      {state.status === "idle" && (
+        <div className="flex flex-col items-center justify-center py-8 gap-4">
+          <p className="text-sm text-muted-foreground text-center max-w-sm">
+            Run a deeper analysis across all 4 models — comparing technical, sentiment, and fundamental phases to find convergence and divergence.
+          </p>
+          <button
+            onClick={onGenerate}
+            className="flex items-center gap-2 bg-primary/10 hover:bg-primary/20 border border-primary/30 hover:border-primary/50 text-primary font-mono text-sm px-5 py-2.5 rounded-xl transition-all"
+          >
+            <Sparkles className="h-4 w-4" />
+            Generate Deep Analysis
+          </button>
+        </div>
+      )}
 
       {/* Loading skeleton */}
       {state.status === "loading" && (
@@ -44,7 +60,7 @@ export function ConsensusSummaryCard({ state, onRegenerate }: ConsensusSummaryCa
             />
           ))}
           <p className="text-xs text-muted-foreground font-mono mt-6 animate-pulse">
-            Synthesizing cross-model phase analysis…
+            Synthesizing cross-model phase analysis… this may take 30–60s
           </p>
         </div>
       )}
@@ -54,7 +70,7 @@ export function ConsensusSummaryCard({ state, onRegenerate }: ConsensusSummaryCa
         <div className="p-4 bg-destructive/10 border border-destructive/30 rounded-xl">
           <p className="text-destructive font-mono text-sm">{state.error}</p>
           <button
-            onClick={onRegenerate}
+            onClick={onGenerate}
             className="mt-3 text-xs text-muted-foreground hover:text-foreground font-mono underline"
           >
             Try again

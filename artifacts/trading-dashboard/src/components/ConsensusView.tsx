@@ -24,7 +24,6 @@ interface ConsensusViewProps {
   ids: [number | null, number | null, number | null, number | null];
   ticker: string;
   date: string;
-  isLiveRun: boolean;
 }
 
 function shortModelName(model: string): string {
@@ -96,22 +95,14 @@ function usePersistedLogs(id: number | null, stream: StreamInstance): AgentState
   return agents;
 }
 
-export function ConsensusView({ streams, consensus, models, ids, ticker, date, isLiveRun }: ConsensusViewProps) {
+export function ConsensusView({ streams, consensus, models, ids, ticker, date }: ConsensusViewProps) {
   const persisted0 = usePersistedLogs(ids[0], streams[0]);
   const persisted1 = usePersistedLogs(ids[1], streams[1]);
   const persisted2 = usePersistedLogs(ids[2], streams[2]);
   const persisted3 = usePersistedLogs(ids[3], streams[3]);
   const persistedAll = [persisted0, persisted1, persisted2, persisted3] as const;
 
-  // Summary triggers when all 4 live streams complete, or immediately for historical views
-  const allStreamsComplete = streams.every(
-    (s) => s.streamData.status === "completed" || s.streamData.status === "error"
-  );
-  const isCompleted = allStreamsComplete || (!isLiveRun && ids.every((id) => id !== null));
-
-  const { state: summaryState, regenerate } = useConsensusSummary(
-    ids, isCompleted, ticker, date, models
-  );
+  const { state: summaryState, generate } = useConsensusSummary(ids, ticker, date, models);
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -173,9 +164,9 @@ export function ConsensusView({ streams, consensus, models, ids, ticker, date, i
         })}
       </Tabs>
 
-      {/* Deep synthesis — appears after all models complete */}
-      {(isCompleted || summaryState.status !== "idle") && (
-        <ConsensusSummaryCard state={summaryState} onRegenerate={regenerate} />
+      {/* Deep synthesis — always shown when IDs are available */}
+      {ids.some((id) => id !== null) && (
+        <ConsensusSummaryCard state={summaryState} onGenerate={generate} />
       )}
     </div>
   );
