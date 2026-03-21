@@ -444,4 +444,119 @@ router.get("/analyses/:id/stream", async (req, res): Promise<void> => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// POST /analyses/consensus-summary
+// Runs a GLM-5 meta-analysis across the 4 consensus analyses, comparing each
+// agent phase (technical, sentiment, fundamental, research) to find convergence
+// and divergence, then produces a weighted confidence score + synthesis.
+// ---------------------------------------------------------------------------
+router.post("/analyses/consensus-summary", async (req, res): Promise<void> => {
+  const { ids, ticker, date, models } = req.body as {
+    ids: number[];
+    ticker: string;
+    date: string;
+    models: string[];
+  };
+
+  if (!Array.isArray(ids) || ids.length !== 4) {
+    res.status(400).json({ error: "ids must be an array of 4 analysis IDs" });
+    return;
+  }
+
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    res.status(503).json({ error: "OPENROUTER_API_KEY not configured" });
+    return;
+  }
+
+  // Fetch logs + final decisions for all 4 analyses in parallel
+  const [allLogs, allAnalyses] = await Promise.all([
+    Promise.all(
+      ids.map((id) =>
+        db.select().from(analysisLogsTable)
+          .where(eq(analysisLogsTable.analysisId, id))
+          .orderBy(analysisLogsTable.sequence)
+      )
+    ),
+    Promise.all(
+      ids.map((id) =>
+        db.select().from(analysesTable).where(eq(analysesTable.id, id)).then((r) => r[0])
+      )
+    ),
+  ]);
+
+  const modelNames = models ?? ids.map((_, i) => `Model ${i + 1}`);
+
+  // Build a structured prompt with each model's per-agent outputs (truncated)
+  const MAX_AGENT_CHARS = 400;
+  let prompt = `You are a senior investment analyst performing a meta-analysis of four independent AI model analyses of ${ticker} (date: ${date}).\n\n`;
+  prompt += `Each model ran a multi-agent analysis pipeline with agents covering technical analysis, sentiment/news, fundamentals, bull/bear research, and a final portfolio decision.\n\n`;
+
+  for (let i = 0; i < 4; i++) {
+    const decision = allAnalyses[i]?.decision ?? "UNKNOWN";
+    const agentLogs = allLogs[i].filter((l) => l.eventType === "agent_update" && l.output);
+    prompt += `## Model ${i + 1}: ${shortName(modelNames[i])} — Decision: **${decision}**\n\n`;
+    for (const log of agentLogs) {
+      const name = log.displayName ?? log.agent ?? "Agent";
+      const out = (log.output ?? "").slice(0, MAX_AGENT_CHARS);
+      const truncated = (log.output ?? "").length > MAX_AGENT_CHARS ? "…[truncated]" : "";
+      prompt += `### ${name}\n${out}${truncated}\n\n`;
+    }
+  }
+
+  prompt += `---\n\n`;
+  prompt += `Based on the above, provide a structured meta-analysis with these sections:\n\n`;
+  prompt += `## Phase-by-Phase Agreement\n`;
+  prompt += `For each analysis phase (Technical, Sentiment/News, Fundamental, Bull/Bear Research), summarize where models converge and where they diverge. Use bullet points.\n\n`;
+  prompt += `## Key Convergent Themes\n`;
+  prompt += `What signals, catalysts, or factors do most or all models agree on? These are the highest-confidence insights.\n\n`;
+  prompt += `## Key Divergences\n`;
+  prompt += `Where do models fundamentally disagree? What likely drives these differences (data interpretation, model bias, weighting of factors)?\n\n`;
+  prompt += `## Synthesis Confidence Score\n`;
+  prompt += `Assign a confidence score (0–100) based on DEPTH of agreement across phases and reasoning quality — not just vote count. `;
+  prompt += `100 = all models agree on final decision AND agree on the key reasons across all phases. `;
+  prompt += `0 = split decision with completely contradictory reasoning at every phase. `;
+  prompt += `Show the score prominently as: **Confidence: XX/100**. Explain what drives the score up or down.\n\n`;
+  prompt += `## Synthesis Recommendation\n`;
+  prompt += `Your final synthesis: what should an investor take away from this multi-model analysis? Highlight the strongest signals and the key risks.\n\n`;
+  prompt += `Be concise, analytical, and direct. Use markdown formatting.`;
+
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://trading-agents.up.railway.app",
+        "X-Title": "Trading Agents Swarm",
+      },
+      body: JSON.stringify({
+        model: "z-ai/glm-5:nitro",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 2000,
+        temperature: 0.2,
+      }),
+      signal: AbortSignal.timeout(120_000),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      res.status(502).json({ error: `OpenRouter error: ${errText}` });
+      return;
+    }
+
+    const data = await response.json() as { choices: Array<{ message: { content: string } }> };
+    const summary = data.choices[0]?.message?.content ?? "";
+    res.json({ summary });
+  } catch (err) {
+    console.error("Consensus summary error:", err);
+    res.status(500).json({ error: "Failed to generate consensus summary" });
+  }
+});
+
+function shortName(model: string): string {
+  const afterSlash = model.split("/").pop() ?? model;
+  return afterSlash.split(":")[0];
+}
+
 export default router;

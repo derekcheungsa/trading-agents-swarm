@@ -3,7 +3,9 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { AgentLog } from "./AgentLog";
 import { DecisionCard } from "./DecisionCard";
 import { ConsensusBanner } from "./ConsensusBanner";
+import { ConsensusSummaryCard } from "./ConsensusSummaryCard";
 import { type ConsensusResult } from "@/hooks/use-consensus-stream";
+import { useConsensusSummary } from "@/hooks/use-consensus-summary";
 import { type useAgentStream, type AgentState } from "@/hooks/use-agent-stream";
 import { cn } from "./Badge";
 
@@ -22,10 +24,10 @@ interface ConsensusViewProps {
   ids: [number | null, number | null, number | null, number | null];
   ticker: string;
   date: string;
+  isLiveRun: boolean;
 }
 
 function shortModelName(model: string): string {
-  // "minimax/minimax-m2.5:nitro" → "minimax-m2.5"
   const afterSlash = model.split("/").pop() ?? model;
   return afterSlash.split(":")[0];
 }
@@ -94,12 +96,22 @@ function usePersistedLogs(id: number | null, stream: StreamInstance): AgentState
   return agents;
 }
 
-export function ConsensusView({ streams, consensus, models, ids, ticker, date }: ConsensusViewProps) {
+export function ConsensusView({ streams, consensus, models, ids, ticker, date, isLiveRun }: ConsensusViewProps) {
   const persisted0 = usePersistedLogs(ids[0], streams[0]);
   const persisted1 = usePersistedLogs(ids[1], streams[1]);
   const persisted2 = usePersistedLogs(ids[2], streams[2]);
   const persisted3 = usePersistedLogs(ids[3], streams[3]);
   const persistedAll = [persisted0, persisted1, persisted2, persisted3] as const;
+
+  // Summary triggers when all 4 live streams complete, or immediately for historical views
+  const allStreamsComplete = streams.every(
+    (s) => s.streamData.status === "completed" || s.streamData.status === "error"
+  );
+  const isCompleted = allStreamsComplete || (!isLiveRun && ids.every((id) => id !== null));
+
+  const { state: summaryState, regenerate } = useConsensusSummary(
+    ids, isCompleted, ticker, date, models
+  );
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -160,6 +172,11 @@ export function ConsensusView({ streams, consensus, models, ids, ticker, date }:
           );
         })}
       </Tabs>
+
+      {/* Deep synthesis — appears after all models complete */}
+      {(isCompleted || summaryState.status !== "idle") && (
+        <ConsensusSummaryCard state={summaryState} onRegenerate={regenerate} />
+      )}
     </div>
   );
 }
