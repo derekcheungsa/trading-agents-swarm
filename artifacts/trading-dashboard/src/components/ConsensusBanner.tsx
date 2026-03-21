@@ -32,7 +32,7 @@ function decisionColor(decision: string | null): string {
 }
 
 export function ConsensusBanner({ consensus, ticker, date }: ConsensusBannerProps) {
-  const { votes, decision, completedCount } = consensus;
+  const { votes, decision, completedCount, confidence } = consensus;
 
   return (
     <div className="glass-panel rounded-2xl p-8">
@@ -47,20 +47,37 @@ export function ConsensusBanner({ consensus, ticker, date }: ConsensusBannerProp
           </div>
           <p className="text-xs text-muted-foreground font-mono uppercase tracking-widest">Consensus Analysis · 4 Models</p>
         </div>
-        {completedCount > 0 && decision && (
-          <div className="text-right">
-            <p className="text-xs text-muted-foreground font-mono mb-1">Consensus</p>
-            <p className={cn("text-3xl font-display font-bold", decisionColor(decision))}>
-              {decision}
-            </p>
-          </div>
-        )}
-        {completedCount > 0 && !decision && (
-          <div className="text-right">
-            <p className="text-xs text-muted-foreground font-mono mb-1">Consensus</p>
-            <p className="text-2xl font-display font-bold text-warning">SPLIT</p>
-          </div>
-        )}
+        <div className="flex items-end gap-6">
+          {/* Confidence score */}
+          {completedCount > 0 && (
+            <div className="text-right">
+              <p className="text-xs text-muted-foreground font-mono mb-1">Confidence</p>
+              <motion.p
+                className="text-3xl font-display font-bold text-foreground"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.4 }}
+              >
+                {confidence}%
+              </motion.p>
+            </div>
+          )}
+          {/* Consensus decision */}
+          {completedCount > 0 && decision && (
+            <div className="text-right">
+              <p className="text-xs text-muted-foreground font-mono mb-1">Consensus</p>
+              <p className={cn("text-3xl font-display font-bold", decisionColor(decision))}>
+                {decision}
+              </p>
+            </div>
+          )}
+          {completedCount > 0 && !decision && (
+            <div className="text-right">
+              <p className="text-xs text-muted-foreground font-mono mb-1">Consensus</p>
+              <p className="text-2xl font-display font-bold text-warning">SPLIT</p>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Vote bars */}

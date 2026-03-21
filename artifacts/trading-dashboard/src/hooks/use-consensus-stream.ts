@@ -7,6 +7,7 @@ export interface ConsensusResult {
   votes: { BUY: number; SELL: number; HOLD: number };
   agreement: "unanimous" | "majority" | "split";
   completedCount: number;
+  confidence: number; // 0–100: max(votes) / total * 100
 }
 
 function computeConsensus(decisions: (string | null)[]): ConsensusResult {
@@ -23,7 +24,8 @@ function computeConsensus(decisions: (string | null)[]): ConsensusResult {
     max === total ? "unanimous"
     : max > total / 2 ? "majority"
     : "split";
-  return { decision, votes, agreement, completedCount };
+  const confidence = completedCount === 0 ? 0 : Math.round((max / total) * 100);
+  return { decision, votes, agreement, completedCount, confidence };
 }
 
 export function useConsensusStream(
