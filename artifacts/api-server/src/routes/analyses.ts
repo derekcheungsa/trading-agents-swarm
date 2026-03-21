@@ -533,7 +533,7 @@ router.post("/analyses/consensus-summary", async (req, res): Promise<void> => {
       body: JSON.stringify({
         model: "z-ai/glm-5:nitro",
         messages: [{ role: "user", content: prompt }],
-        max_tokens: 2000,
+        max_tokens: 6000,
         temperature: 0.2,
       }),
       signal: AbortSignal.timeout(120_000),
