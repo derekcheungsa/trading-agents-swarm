@@ -1,17 +1,25 @@
+import { useState, useEffect } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { AgentLog } from "./AgentLog";
 import { DecisionCard } from "./DecisionCard";
 import { ConsensusBanner } from "./ConsensusBanner";
 import { type ConsensusResult } from "@/hooks/use-consensus-stream";
-import { type useAgentStream } from "@/hooks/use-agent-stream";
+import { type useAgentStream, type AgentState } from "@/hooks/use-agent-stream";
 import { cn } from "./Badge";
 
 type StreamInstance = ReturnType<typeof useAgentStream>;
+
+interface AnalysisLog {
+  id: number; analysisId: number; sequence: number;
+  eventType: string; agent: string | null; displayName: string | null;
+  status: string | null; output: string | null; message: string | null;
+}
 
 interface ConsensusViewProps {
   streams: readonly [StreamInstance, StreamInstance, StreamInstance, StreamInstance];
   consensus: ConsensusResult;
   models: [string, string, string, string];
+  ids: [number | null, number | null, number | null, number | null];
   ticker: string;
   date: string;
 }
@@ -55,7 +63,44 @@ function ModelTabLabel({ model, stream }: { model: string; stream: StreamInstanc
   );
 }
 
-export function ConsensusView({ streams, consensus, models, ticker, date }: ConsensusViewProps) {
+function usePersistedLogs(id: number | null, stream: StreamInstance): AgentState[] {
+  const [agents, setAgents] = useState<AgentState[]>([]);
+  const status = stream.streamData.status;
+
+  useEffect(() => {
+    if (!id) { setAgents([]); return; }
+    if (status !== "completed" && status !== "error") { setAgents([]); return; }
+    if (stream.streamData.agents.length > 0) { setAgents([]); return; }
+
+    fetch(`/api/analyses/${id}/logs`)
+      .then((r) => r.json())
+      .then((logs: AnalysisLog[]) => {
+        const agentMap = new Map<string, AgentState>();
+        for (const log of logs) {
+          if (log.eventType === "agent_update" && log.agent) {
+            agentMap.set(log.agent, {
+              agent: log.agent,
+              displayName: log.displayName ?? log.agent,
+              status: (log.status as AgentState["status"]) ?? "completed",
+              output: log.output ?? "",
+            });
+          }
+        }
+        setAgents(Array.from(agentMap.values()));
+      })
+      .catch(console.error);
+  }, [id, status]);
+
+  return agents;
+}
+
+export function ConsensusView({ streams, consensus, models, ids, ticker, date }: ConsensusViewProps) {
+  const persisted0 = usePersistedLogs(ids[0], streams[0]);
+  const persisted1 = usePersistedLogs(ids[1], streams[1]);
+  const persisted2 = usePersistedLogs(ids[2], streams[2]);
+  const persisted3 = usePersistedLogs(ids[3], streams[3]);
+  const persistedAll = [persisted0, persisted1, persisted2, persisted3] as const;
+
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       <ConsensusBanner consensus={consensus} ticker={ticker} date={date} />
@@ -77,7 +122,8 @@ export function ConsensusView({ streams, consensus, models, ticker, date }: Cons
           const { streamData, elapsedSeconds, completedCount } = stream;
           const isConnecting = streamData.status === "connecting";
           const isStreaming = streamData.status === "streaming" || isConnecting;
-          const showAgentLog = isStreaming || streamData.agents.length > 0;
+          const displayAgents = streamData.agents.length > 0 ? streamData.agents : persistedAll[i];
+          const showAgentLog = isStreaming || displayAgents.length > 0;
 
           return (
             <TabsContent key={i} value={String(i)} className="mt-6 space-y-8">
@@ -97,7 +143,7 @@ export function ConsensusView({ streams, consensus, models, ticker, date }: Cons
               {/* Agent log */}
               {showAgentLog && (
                 <AgentLog
-                  agents={streamData.agents}
+                  agents={displayAgents}
                   elapsedSeconds={elapsedSeconds}
                   completedCount={completedCount}
                   isConnecting={isConnecting}

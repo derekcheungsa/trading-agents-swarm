@@ -37,13 +37,12 @@ Browser → Express API (Node.js) → FastAPI Agent Service (Python)
 |---|---|
 | `OPENROUTER_API_KEY` | OpenRouter API key — used for all LLM calls. Get one at [openrouter.ai/keys](https://openrouter.ai/keys) |
 | `DATABASE_URL` | PostgreSQL connection string. On Railway, add a Postgres plugin and set this to `${{Postgres.DATABASE_URL}}` |
-| `FINANCIAL_MODELING_PREP_API_KEY` | FMP API key for financial data. Get one at [financialmodelingprep.com](https://financialmodelingprep.com/developer/docs) |
 
 ### Setup Steps
 
 1. Click the **Deploy on Railway** button above
 2. Add a **PostgreSQL** database plugin in the Railway dashboard
-3. Set `OPENROUTER_API_KEY`, `DATABASE_URL` (`${{Postgres.DATABASE_URL}}`), and `FINANCIAL_MODELING_PREP_API_KEY`
+3. Set `OPENROUTER_API_KEY` and `DATABASE_URL` (`${{Postgres.DATABASE_URL}}`)
 4. Railway detects the `Dockerfile` automatically — the build starts on first deploy
 
 > **Database schema** is pushed automatically on first startup via Drizzle.

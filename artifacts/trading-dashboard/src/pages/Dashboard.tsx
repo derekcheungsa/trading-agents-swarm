@@ -458,6 +458,7 @@ export default function Dashboard() {
               streams={streams}
               consensus={consensus}
               models={consensusModels}
+              ids={consensusIds ?? [null, null, null, null]}
               ticker={consensusTicker}
               date={consensusDate}
             />
