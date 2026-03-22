@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { AgentLog } from "./AgentLog";
 import { DecisionCard } from "./DecisionCard";
@@ -103,6 +103,25 @@ export function ConsensusView({ streams, consensus, models, ids, ticker, date }:
   const persistedAll = [persisted0, persisted1, persisted2, persisted3] as const;
 
   const { state: summaryState, generate } = useConsensusSummary(ids, ticker, date, models);
+
+  const allDone = streams.every(
+    (s) => s.streamData.status === "completed" || s.streamData.status === "error"
+  );
+  const autoTriggeredRef = useRef(false);
+  const idsKey = ids.join(",");
+
+  // Reset auto-trigger guard when IDs change (new consensus run)
+  useEffect(() => {
+    autoTriggeredRef.current = false;
+  }, [idsKey]);
+
+  // Auto-trigger deep analysis once all streams finish
+  useEffect(() => {
+    if (allDone && ids.every((id) => id !== null) && !autoTriggeredRef.current && summaryState.status === "idle") {
+      autoTriggeredRef.current = true;
+      generate();
+    }
+  }, [allDone]);
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
