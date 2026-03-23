@@ -554,6 +554,146 @@ router.post("/analyses/consensus-summary", async (req, res): Promise<void> => {
   }
 });
 
+// ── Deliberation (bull/bear debate) ──────────────────────────────────
+
+router.post("/analyses/deliberation", async (req, res): Promise<void> => {
+  const { ids, ticker, date, models } = req.body as {
+    ids: number[];
+    ticker: string;
+    date: string;
+    models: string[];
+  };
+
+  if (!Array.isArray(ids) || ids.length !== 4) {
+    res.status(400).json({ error: "ids must be an array of 4 analysis IDs" });
+    return;
+  }
+
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    res.status(503).json({ error: "OPENROUTER_API_KEY not configured" });
+    return;
+  }
+
+  // Fetch logs + final decisions for all 4 analyses in parallel
+  const [allLogs, allAnalyses] = await Promise.all([
+    Promise.all(
+      ids.map((id) =>
+        db.select().from(analysisLogsTable)
+          .where(eq(analysisLogsTable.analysisId, id))
+          .orderBy(analysisLogsTable.sequence)
+      )
+    ),
+    Promise.all(
+      ids.map((id) =>
+        db.select().from(analysesTable).where(eq(analysesTable.id, id)).then((r) => r[0])
+      )
+    ),
+  ]);
+
+  const modelNames = models ?? ids.map((_, i) => `Model ${i + 1}`);
+
+  // Classify each model's stance
+  type Stance = "BULL" | "BEAR" | "NEUTRAL";
+  const stances = allAnalyses.map((a, i) => {
+    const decision = (a?.decision ?? "HOLD").toUpperCase();
+    const stance: Stance = decision === "BUY" ? "BULL" : decision === "SELL" ? "BEAR" : "NEUTRAL";
+    return { model: shortName(modelNames[i]), stance, decision };
+  });
+  const bulls = stances.filter((s) => s.stance === "BULL").map((s) => s.model);
+  const bears = stances.filter((s) => s.stance === "BEAR").map((s) => s.model);
+  const neutrals = stances.filter((s) => s.stance === "NEUTRAL").map((s) => s.model);
+
+  // Build deliberation prompt
+  const MAX_AGENT_CHARS = 400;
+  let prompt = `You are the chairperson of an investment committee deliberation on ${ticker} (date: ${date}).\n\n`;
+  prompt += `Four independent AI analyst teams have completed their research. Your job is to structure a rigorous bull vs bear debate using their actual reasoning, play devil's advocate on BOTH sides, and render a committee verdict.\n\n`;
+
+  // Stance summary
+  prompt += `## Position Summary\n`;
+  if (bulls.length > 0) prompt += `- **BULLISH (BUY):** ${bulls.join(", ")}\n`;
+  if (bears.length > 0) prompt += `- **BEARISH (SELL):** ${bears.join(", ")}\n`;
+  if (neutrals.length > 0) prompt += `- **NEUTRAL (HOLD):** ${neutrals.join(", ")}\n`;
+  prompt += `\n`;
+
+  // Per-model reasoning with stance labels
+  for (let i = 0; i < 4; i++) {
+    const { model, stance, decision } = stances[i];
+    const agentLogs = allLogs[i].filter((l) => l.eventType === "agent_update" && l.output);
+    prompt += `## Model ${i + 1}: ${model} [${stance} — ${decision}]\n\n`;
+    for (const log of agentLogs) {
+      const name = log.displayName ?? log.agent ?? "Agent";
+      const out = (log.output ?? "").slice(0, MAX_AGENT_CHARS);
+      const truncated = (log.output ?? "").length > MAX_AGENT_CHARS ? "…[truncated]" : "";
+      prompt += `### ${name}\n${out}${truncated}\n\n`;
+    }
+  }
+
+  prompt += `---\n\n`;
+  prompt += `Using the analyst reasoning above, produce the following structured deliberation:\n\n`;
+
+  prompt += `## Bull Case`;
+  if (bulls.length > 0) prompt += ` (argued by ${bulls.join(", ")})`;
+  prompt += `\n`;
+  prompt += `Synthesize the strongest bullish arguments from the analysts. Quote specific reasoning from the models. `;
+  prompt += `If no models are bullish, construct the best possible bull case from the available evidence and data points.\n\n`;
+
+  prompt += `## Bear Case`;
+  if (bears.length > 0) prompt += ` (argued by ${bears.join(", ")})`;
+  prompt += `\n`;
+  prompt += `Synthesize the strongest bearish arguments from the analysts. Quote specific reasoning from the models. `;
+  prompt += `If no models are bearish, construct the best possible bear case from the available evidence and data points.\n\n`;
+
+  prompt += `## Devil's Advocate Challenges\n`;
+  prompt += `For EACH side, identify the weakest points in their argument. What are they ignoring or underweighting? What assumptions are most fragile? Be adversarial and specific.\n\n`;
+
+  prompt += `## Key Points of Contention\n`;
+  prompt += `Identify the 3–5 specific factual or interpretive disagreements between the bull and bear cases. For each, state what data or events would resolve the disagreement.\n\n`;
+
+  prompt += `## What Would Change Each Side's Mind?\n`;
+  prompt += `- **Bulls would turn bearish if:** [specific conditions]\n`;
+  prompt += `- **Bears would turn bullish if:** [specific conditions]\n\n`;
+
+  prompt += `## Investment Committee Verdict\n`;
+  prompt += `As committee chair, render a final verdict: **BUY**, **SELL**, or **HOLD**. `;
+  prompt += `State the vote breakdown, the key deciding factor, and assign a conviction level (1–10). `;
+  prompt += `Be decisive — committees that cannot decide are useless.\n\n`;
+
+  prompt += `Format as markdown. Be adversarial, specific, and quote the analysts directly.`;
+
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://trading-agents.up.railway.app",
+        "X-Title": "Trading Agents Swarm",
+      },
+      body: JSON.stringify({
+        model: "z-ai/glm-5:nitro",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 32000,
+        temperature: 0.3,
+      }),
+      signal: AbortSignal.timeout(120_000),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      res.status(502).json({ error: `OpenRouter error: ${errText}` });
+      return;
+    }
+
+    const data = await response.json() as { choices: Array<{ message: { content: string } }> };
+    const deliberation = data.choices[0]?.message?.content ?? "";
+    res.json({ deliberation });
+  } catch (err) {
+    console.error("Deliberation error:", err);
+    res.status(500).json({ error: "Failed to generate deliberation" });
+  }
+});
+
 function shortName(model: string): string {
   const afterSlash = model.split("/").pop() ?? model;
   return afterSlash.split(":")[0];

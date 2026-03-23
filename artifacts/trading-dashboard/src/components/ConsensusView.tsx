@@ -4,8 +4,10 @@ import { AgentLog } from "./AgentLog";
 import { DecisionCard } from "./DecisionCard";
 import { ConsensusBanner } from "./ConsensusBanner";
 import { ConsensusSummaryCard } from "./ConsensusSummaryCard";
+import { DeliberationCard } from "./DeliberationCard";
 import { type ConsensusResult } from "@/hooks/use-consensus-stream";
 import { useConsensusSummary } from "@/hooks/use-consensus-summary";
+import { useDeliberation } from "@/hooks/use-deliberation";
 import { type useAgentStream, type AgentState } from "@/hooks/use-agent-stream";
 import { cn } from "./Badge";
 
@@ -103,6 +105,7 @@ export function ConsensusView({ streams, consensus, models, ids, ticker, date }:
   const persistedAll = [persisted0, persisted1, persisted2, persisted3] as const;
 
   const { state: summaryState, generate } = useConsensusSummary(ids, ticker, date, models);
+  const { state: deliberationState, generate: generateDeliberation } = useDeliberation(ids, ticker, date, models);
 
   const allDone = streams.every(
     (s) => s.streamData.status === "completed" || s.streamData.status === "error"
@@ -186,6 +189,11 @@ export function ConsensusView({ streams, consensus, models, ids, ticker, date }:
       {/* Deep synthesis — always shown when IDs are available */}
       {ids.some((id) => id !== null) && (
         <ConsensusSummaryCard state={summaryState} onGenerate={generate} />
+      )}
+
+      {/* Investment committee deliberation — user-initiated */}
+      {ids.some((id) => id !== null) && (
+        <DeliberationCard state={deliberationState} onGenerate={generateDeliberation} />
       )}
     </div>
   );
