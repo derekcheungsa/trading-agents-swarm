@@ -17,8 +17,8 @@ const VOTE_CONFIG = [
 function agreementLabel(consensus: ConsensusResult): string {
   const { agreement, votes, completedCount } = consensus;
   if (completedCount === 0) return "Waiting for results...";
-  if (agreement === "unanimous") return `Unanimous · ${completedCount}/4`;
-  if (agreement === "majority") return `Majority · ${Math.max(votes.BUY, votes.SELL, votes.HOLD)}/4`;
+  if (agreement === "unanimous") return `Unanimous · ${completedCount}/3`;
+  if (agreement === "majority") return `Majority · ${Math.max(votes.BUY, votes.SELL, votes.HOLD)}/3`;
   const parts = (["BUY", "HOLD", "SELL"] as const)
     .filter((k) => votes[k] > 0)
     .map((k) => `${k} ${votes[k]}`);
@@ -45,7 +45,7 @@ export function ConsensusBanner({ consensus, ticker, date }: ConsensusBannerProp
               {date}
             </span>
           </div>
-          <p className="text-xs text-muted-foreground font-mono uppercase tracking-widest">Consensus Analysis · 4 Models</p>
+          <p className="text-xs text-muted-foreground font-mono uppercase tracking-widest">Consensus Analysis · 3 Models</p>
         </div>
         <div className="flex items-end gap-6">
           {/* Confidence score */}
@@ -84,7 +84,7 @@ export function ConsensusBanner({ consensus, ticker, date }: ConsensusBannerProp
       <div className="space-y-3">
         {VOTE_CONFIG.map(({ key, label, color, textColor }) => {
           const count = votes[key];
-          const pct = (count / 4) * 100;
+          const pct = (count / 3) * 100;
           return (
             <div key={key} className="flex items-center gap-4">
               <span className={cn("font-mono text-xs font-bold w-10", count > 0 ? textColor : "text-muted-foreground/40")}>

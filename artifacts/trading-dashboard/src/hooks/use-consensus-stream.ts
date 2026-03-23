@@ -29,19 +29,18 @@ function computeConsensus(decisions: (string | null)[]): ConsensusResult {
 }
 
 export function useConsensusStream(
-  ids: [number | null, number | null, number | null, number | null],
+  ids: [number | null, number | null, number | null],
   isLive: boolean
 ) {
   const s0 = useAgentStream(ids[0], isLive);
   const s1 = useAgentStream(ids[1], isLive);
   const s2 = useAgentStream(ids[2], isLive);
-  const s3 = useAgentStream(ids[3], isLive);
-  const streams = [s0, s1, s2, s3] as const;
+  const streams = [s0, s1, s2] as const;
   const decisions = streams.map((s) => s.streamData.decision);
   const consensus = computeConsensus(decisions);
   const allDone = streams.every(
     (s) => s.streamData.status === "completed" || s.streamData.status === "error"
   );
-  const resetAll = () => { s0.resetStream(); s1.resetStream(); s2.resetStream(); s3.resetStream(); };
+  const resetAll = () => { s0.resetStream(); s1.resetStream(); s2.resetStream(); };
   return { streams, consensus, allDone, resetAll };
 }

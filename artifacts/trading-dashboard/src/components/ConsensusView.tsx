@@ -23,10 +23,10 @@ interface AnalysisLog {
 }
 
 interface ConsensusViewProps {
-  streams: readonly [StreamInstance, StreamInstance, StreamInstance, StreamInstance];
+  streams: readonly [StreamInstance, StreamInstance, StreamInstance];
   consensus: ConsensusResult;
-  models: [string, string, string, string];
-  ids: [number | null, number | null, number | null, number | null];
+  models: [string, string, string];
+  ids: [number | null, number | null, number | null];
   ticker: string;
   date: string;
 }
@@ -104,8 +104,7 @@ export function ConsensusView({ streams, consensus, models, ids, ticker, date }:
   const persisted0 = usePersistedLogs(ids[0], streams[0]);
   const persisted1 = usePersistedLogs(ids[1], streams[1]);
   const persisted2 = usePersistedLogs(ids[2], streams[2]);
-  const persisted3 = usePersistedLogs(ids[3], streams[3]);
-  const persistedAll = [persisted0, persisted1, persisted2, persisted3] as const;
+  const persistedAll = [persisted0, persisted1, persisted2] as const;
 
   const { state: summaryState, generate } = useConsensusSummary(ids, ticker, date, models);
   const { state: deliberationState, generate: generateDeliberation } = useDeliberation(ids, ticker, date, models);
@@ -128,7 +127,7 @@ export function ConsensusView({ streams, consensus, models, ids, ticker, date }:
       <ConsensusBanner consensus={consensus} ticker={ticker} date={date} />
 
       <Tabs defaultValue="0" className="w-full">
-        <TabsList className="w-full grid grid-cols-4 h-auto p-1 bg-card/50 border border-border rounded-xl">
+        <TabsList className="w-full grid grid-cols-3 h-auto p-1 bg-card/50 border border-border rounded-xl">
           {models.map((model, i) => (
             <TabsTrigger
               key={i}

@@ -33,11 +33,10 @@ const formSchema = z.object({
 
 type FormValues = z.infer<typeof formSchema>;
 
-const DEFAULT_CONSENSUS_MODELS: [string, string, string, string] = [
+const DEFAULT_CONSENSUS_MODELS: [string, string, string] = [
   "openai/gpt-5.4-mini:nitro",
   "z-ai/glm-5:nitro",
   "google/gemini-3-flash-preview:nitro",
-  "minimax/minimax-m2.7:nitro",
 ];
 
 // ---------------------------------------------------------------------------
@@ -83,8 +82,8 @@ export default function Dashboard() {
 
   // Consensus mode state
   const [mode, setMode] = useState<"single" | "consensus">("single");
-  const [consensusIds, setConsensusIds] = useState<[number, number, number, number] | null>(null);
-  const [consensusModels, setConsensusModels] = useState<[string, string, string, string]>(DEFAULT_CONSENSUS_MODELS);
+  const [consensusIds, setConsensusIds] = useState<[number, number, number] | null>(null);
+  const [consensusModels, setConsensusModels] = useState<[string, string, string]>(DEFAULT_CONSENSUS_MODELS);
   // Track ticker/date for the consensus header (form values at submit time)
   const [consensusTicker, setConsensusTicker] = useState("");
   const [consensusDate, setConsensusDate] = useState("");
@@ -104,7 +103,7 @@ export default function Dashboard() {
 
   // Consensus SSE stream hooks (always called — React rules require unconditional hooks)
   const { streams, consensus, resetAll } = useConsensusStream(
-    consensusIds ?? [null, null, null, null],
+    consensusIds ?? [null, null, null],
     isLiveRun && mode === "consensus"
   );
 
@@ -157,13 +156,13 @@ export default function Dashboard() {
       if (mode === "consensus") {
         setConsensusTicker(data.ticker);
         setConsensusDate(data.date);
-        const [r1, r2, r3, r4] = await Promise.all(
+        const [r1, r2, r3] = await Promise.all(
           consensusModels.map((model) =>
             createMutation.mutateAsync({ data: { ...data, model } })
           )
         );
         setIsLiveRun(true);
-        setConsensusIds([r1.id, r2.id, r3.id, r4.id]);
+        setConsensusIds([r1.id, r2.id, r3.id]);
       } else {
         const result = await createMutation.mutateAsync({ data });
         setIsLiveRun(true);
@@ -185,12 +184,12 @@ export default function Dashboard() {
   };
 
   const handleGroupClick = (items: AnalysisItem[]) => {
-    const [a, b, c, d] = items;
+    const [a, b, c] = items;
     setMode("consensus");
     setIsLiveRun(false);
     setSelectedId(null);
-    setConsensusIds([a.id, b?.id ?? a.id, c?.id ?? a.id, d?.id ?? a.id]);
-    setConsensusModels([a.model, b?.model ?? a.model, c?.model ?? a.model, d?.model ?? a.model] as [string, string, string, string]);
+    setConsensusIds([a.id, b?.id ?? a.id, c?.id ?? a.id]);
+    setConsensusModels([a.model, b?.model ?? a.model, c?.model ?? a.model] as [string, string, string]);
     setConsensusTicker(a.ticker);
     setConsensusDate(a.date);
     resetStream();
@@ -407,12 +406,12 @@ export default function Dashboard() {
                     />
                   ) : (
                     <div className="space-y-2">
-                      {([0, 1, 2, 3] as const).map((i) => (
+                      {([0, 1, 2] as const).map((i) => (
                         <input
                           key={i}
                           value={consensusModels[i]}
                           onChange={(e) => setConsensusModels((prev) => {
-                            const next = [...prev] as [string, string, string, string];
+                            const next = [...prev] as [string, string, string];
                             next[i] = e.target.value;
                             return next;
                           })}
@@ -458,7 +457,7 @@ export default function Dashboard() {
               streams={streams}
               consensus={consensus}
               models={consensusModels}
-              ids={consensusIds ?? [null, null, null, null]}
+              ids={consensusIds ?? [null, null, null]}
               ticker={consensusTicker}
               date={consensusDate}
             />

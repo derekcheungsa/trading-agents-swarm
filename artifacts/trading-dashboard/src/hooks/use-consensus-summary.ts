@@ -7,10 +7,10 @@ export interface ConsensusSummaryState {
 }
 
 export function useConsensusSummary(
-  ids: [number | null, number | null, number | null, number | null],
+  ids: [number | null, number | null, number | null],
   ticker: string,
   date: string,
-  models: [string, string, string, string]
+  models: [string, string, string]
 ): { state: ConsensusSummaryState; generate: () => void } {
   const [state, setState] = useState<ConsensusSummaryState>({ status: "idle", summary: "" });
 

@@ -7,10 +7,10 @@ export interface OptionsStrategyState {
 }
 
 export function useOptionsStrategy(
-  ids: [number | null, number | null, number | null, number | null],
+  ids: [number | null, number | null, number | null],
   ticker: string,
   date: string,
-  models: [string, string, string, string]
+  models: [string, string, string]
 ): { state: OptionsStrategyState; generate: () => void } {
   const [state, setState] = useState<OptionsStrategyState>({ status: "idle", strategy: "" });
 

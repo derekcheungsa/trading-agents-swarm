@@ -7,10 +7,10 @@ export interface DeliberationState {
 }
 
 export function useDeliberation(
-  ids: [number | null, number | null, number | null, number | null],
+  ids: [number | null, number | null, number | null],
   ticker: string,
   date: string,
-  models: [string, string, string, string]
+  models: [string, string, string]
 ): { state: DeliberationState; generate: () => void } {
   const [state, setState] = useState<DeliberationState>({ status: "idle", deliberation: "" });
 

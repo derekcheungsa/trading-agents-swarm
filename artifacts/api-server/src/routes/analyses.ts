@@ -458,8 +458,8 @@ router.post("/analyses/consensus-summary", async (req, res): Promise<void> => {
     models: string[];
   };
 
-  if (!Array.isArray(ids) || ids.length !== 4) {
-    res.status(400).json({ error: "ids must be an array of 4 analysis IDs" });
+  if (!Array.isArray(ids) || ids.length !== 3) {
+    res.status(400).json({ error: "ids must be an array of 3 analysis IDs" });
     return;
   }
 
@@ -489,10 +489,10 @@ router.post("/analyses/consensus-summary", async (req, res): Promise<void> => {
 
   // Build a structured prompt with each model's per-agent outputs (truncated)
   const MAX_AGENT_CHARS = 400;
-  let prompt = `You are a senior investment analyst performing a meta-analysis of four independent AI model analyses of ${ticker} (date: ${date}).\n\n`;
+  let prompt = `You are a senior investment analyst performing a meta-analysis of three independent AI model analyses of ${ticker} (date: ${date}).\n\n`;
   prompt += `Each model ran a multi-agent analysis pipeline with agents covering technical analysis, sentiment/news, fundamentals, bull/bear research, and a final portfolio decision.\n\n`;
 
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < ids.length; i++) {
     const decision = allAnalyses[i]?.decision ?? "UNKNOWN";
     const agentLogs = allLogs[i].filter((l) => l.eventType === "agent_update" && l.output);
     prompt += `## Model ${i + 1}: ${shortName(modelNames[i])} — Decision: **${decision}**\n\n`;
@@ -564,8 +564,8 @@ router.post("/analyses/deliberation", async (req, res): Promise<void> => {
     models: string[];
   };
 
-  if (!Array.isArray(ids) || ids.length !== 4) {
-    res.status(400).json({ error: "ids must be an array of 4 analysis IDs" });
+  if (!Array.isArray(ids) || ids.length !== 3) {
+    res.status(400).json({ error: "ids must be an array of 3 analysis IDs" });
     return;
   }
 
@@ -607,7 +607,7 @@ router.post("/analyses/deliberation", async (req, res): Promise<void> => {
   // Build deliberation prompt
   const MAX_AGENT_CHARS = 400;
   let prompt = `You are the chairperson of an investment committee deliberation on ${ticker} (date: ${date}).\n\n`;
-  prompt += `Four independent AI analyst teams have completed their research. Your job is to structure a rigorous bull vs bear debate using their actual reasoning, play devil's advocate on BOTH sides, and render a committee verdict.\n\n`;
+  prompt += `Three independent AI analyst teams have completed their research. Your job is to structure a rigorous bull vs bear debate using their actual reasoning, play devil's advocate on BOTH sides, and render a committee verdict.\n\n`;
 
   // Stance summary
   prompt += `## Position Summary\n`;
@@ -617,7 +617,7 @@ router.post("/analyses/deliberation", async (req, res): Promise<void> => {
   prompt += `\n`;
 
   // Per-model reasoning with stance labels
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < ids.length; i++) {
     const { model, stance, decision } = stances[i];
     const agentLogs = allLogs[i].filter((l) => l.eventType === "agent_update" && l.output);
     prompt += `## Model ${i + 1}: ${model} [${stance} — ${decision}]\n\n`;
@@ -704,8 +704,8 @@ router.post("/analyses/options-strategy", async (req, res): Promise<void> => {
     models: string[];
   };
 
-  if (!Array.isArray(ids) || ids.length !== 4) {
-    res.status(400).json({ error: "ids must be an array of 4 analysis IDs" });
+  if (!Array.isArray(ids) || ids.length !== 3) {
+    res.status(400).json({ error: "ids must be an array of 3 analysis IDs" });
     return;
   }
 
@@ -744,7 +744,7 @@ router.post("/analyses/options-strategy", async (req, res): Promise<void> => {
   const neutrals = stances.filter((s) => s.stance === "NEUTRAL").map((s) => s.model);
 
   const MAX_AGENT_CHARS = 400;
-  let prompt = `You are a senior options strategist translating equity analysis into actionable options trading guidance for ${ticker} (date: ${date}). You are synthesizing the output of four independent AI analyst teams who each ran technical, sentiment, fundamental, and research agents.\n\n`;
+  let prompt = `You are a senior options strategist translating equity analysis into actionable options trading guidance for ${ticker} (date: ${date}). You are synthesizing the output of three independent AI analyst teams who each ran technical, sentiment, fundamental, and research agents.\n\n`;
   prompt += `IMPORTANT: Begin your response with this disclaimer:\n`;
   prompt += `> ⚠️ **AI-Generated Options Analysis — Not Financial Advice.** Options involve substantial risk of loss. Consult a qualified financial advisor before trading.\n\n`;
 
@@ -756,7 +756,7 @@ router.post("/analyses/options-strategy", async (req, res): Promise<void> => {
   prompt += `- **Agreement:** ${bulls.length + bears.length + neutrals.length} models — ${stances.map((s) => s.decision).join(", ")}\n\n`;
 
   // Per-model agent outputs with stance labels
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < ids.length; i++) {
     const { model, stance, decision } = stances[i];
     const agentLogs = allLogs[i].filter((l) => l.eventType === "agent_update" && l.output);
     prompt += `## Model ${i + 1}: ${model} [${stance} — ${decision}]\n\n`;
