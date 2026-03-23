@@ -694,6 +694,171 @@ router.post("/analyses/deliberation", async (req, res): Promise<void> => {
   }
 });
 
+// ── Options Strategy Advisor ────────────────────────────────────────
+
+router.post("/analyses/options-strategy", async (req, res): Promise<void> => {
+  const { ids, ticker, date, models } = req.body as {
+    ids: number[];
+    ticker: string;
+    date: string;
+    models: string[];
+  };
+
+  if (!Array.isArray(ids) || ids.length !== 4) {
+    res.status(400).json({ error: "ids must be an array of 4 analysis IDs" });
+    return;
+  }
+
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    res.status(503).json({ error: "OPENROUTER_API_KEY not configured" });
+    return;
+  }
+
+  const [allLogs, allAnalyses] = await Promise.all([
+    Promise.all(
+      ids.map((id) =>
+        db.select().from(analysisLogsTable)
+          .where(eq(analysisLogsTable.analysisId, id))
+          .orderBy(analysisLogsTable.sequence)
+      )
+    ),
+    Promise.all(
+      ids.map((id) =>
+        db.select().from(analysesTable).where(eq(analysesTable.id, id)).then((r) => r[0])
+      )
+    ),
+  ]);
+
+  const modelNames = models ?? ids.map((_, i) => `Model ${i + 1}`);
+
+  // Classify stances
+  type Stance = "BULL" | "BEAR" | "NEUTRAL";
+  const stances = allAnalyses.map((a, i) => {
+    const decision = (a?.decision ?? "HOLD").toUpperCase();
+    const stance: Stance = decision === "BUY" ? "BULL" : decision === "SELL" ? "BEAR" : "NEUTRAL";
+    return { model: shortName(modelNames[i]), stance, decision };
+  });
+  const bulls = stances.filter((s) => s.stance === "BULL").map((s) => s.model);
+  const bears = stances.filter((s) => s.stance === "BEAR").map((s) => s.model);
+  const neutrals = stances.filter((s) => s.stance === "NEUTRAL").map((s) => s.model);
+
+  const MAX_AGENT_CHARS = 400;
+  let prompt = `You are a senior options strategist translating equity analysis into actionable options trading guidance for ${ticker} (date: ${date}). You are synthesizing the output of four independent AI analyst teams who each ran technical, sentiment, fundamental, and research agents.\n\n`;
+  prompt += `IMPORTANT: Begin your response with this disclaimer:\n`;
+  prompt += `> ⚠️ **AI-Generated Options Analysis — Not Financial Advice.** Options involve substantial risk of loss. Consult a qualified financial advisor before trading.\n\n`;
+
+  // Position summary
+  prompt += `## Position Summary\n`;
+  if (bulls.length > 0) prompt += `- **BULLISH (BUY):** ${bulls.join(", ")}\n`;
+  if (bears.length > 0) prompt += `- **BEARISH (SELL):** ${bears.join(", ")}\n`;
+  if (neutrals.length > 0) prompt += `- **NEUTRAL (HOLD):** ${neutrals.join(", ")}\n`;
+  prompt += `- **Agreement:** ${bulls.length + bears.length + neutrals.length} models — ${stances.map((s) => s.decision).join(", ")}\n\n`;
+
+  // Per-model agent outputs with stance labels
+  for (let i = 0; i < 4; i++) {
+    const { model, stance, decision } = stances[i];
+    const agentLogs = allLogs[i].filter((l) => l.eventType === "agent_update" && l.output);
+    prompt += `## Model ${i + 1}: ${model} [${stance} — ${decision}]\n\n`;
+    for (const log of agentLogs) {
+      const name = log.displayName ?? log.agent ?? "Agent";
+      const out = (log.output ?? "").slice(0, MAX_AGENT_CHARS);
+      const truncated = (log.output ?? "").length > MAX_AGENT_CHARS ? "…[truncated]" : "";
+      prompt += `### ${name}\n${out}${truncated}\n\n`;
+    }
+  }
+
+  prompt += `---\n\n`;
+  prompt += `Using the analyst reasoning above, produce the following structured options analysis. Extract specific numbers (RSI values, support/resistance levels, ATR, moving averages, P/E ratios, earnings dates) from the agent outputs wherever available.\n\n`;
+
+  prompt += `## 1. Directional Assessment\n`;
+  prompt += `Synthesize the consensus direction across all 4 models:\n`;
+  prompt += `- **Net Bias:** Bullish / Bearish / Neutral\n`;
+  prompt += `- **Strength:** Strong / Moderate / Weak\n`;
+  prompt += `- **Basis:** Cite the specific vote split and key reasoning from portfolio managers and risk managers\n\n`;
+
+  prompt += `## 2. Volatility Outlook\n`;
+  prompt += `Based on technical analysis outputs (ATR, Bollinger Bands, recent price ranges) and upcoming catalysts:\n`;
+  prompt += `- **Current Volatility Regime:** High / Normal / Low (cite ATR values and Bollinger Band positioning if available)\n`;
+  prompt += `- **Expected IV Direction:** Rising / Stable / Declining\n`;
+  prompt += `- **Premium Recommendation:** Buy premium (if IV low + catalyst ahead) or Sell premium (if IV elevated + mean reversion expected)\n`;
+  prompt += `- **Rationale:** Cite specific technical indicators\n\n`;
+
+  prompt += `## 3. Key Levels for Strike Selection\n`;
+  prompt += `Extract from technical analysis across all models:\n`;
+  prompt += `- **Current Price Context:** Where price sits relative to key MAs\n`;
+  prompt += `- **Immediate Support:** Nearest support level(s) with source model\n`;
+  prompt += `- **Immediate Resistance:** Nearest resistance level(s) with source model\n`;
+  prompt += `- **Extended Levels:** Further-out support/resistance for wider strategies\n`;
+  prompt += `- **Strike Selection Guidance:** How these levels map to strike choices\n\n`;
+
+  prompt += `## 4. Catalyst & Timing Analysis\n`;
+  prompt += `From news, sentiment, and fundamentals agents:\n`;
+  prompt += `- **Known Upcoming Events:** Earnings dates, FDA decisions, product launches, macro events, ex-dividend dates\n`;
+  prompt += `- **Event Impact Assessment:** Binary (gap risk) vs gradual\n`;
+  prompt += `- **Expiration Windows:**\n`;
+  prompt += `  - If playing a specific catalyst: suggest expiration after the event\n`;
+  prompt += `  - If no near-term catalyst: suggest 30–45 DTE for optimal theta/gamma balance\n`;
+  prompt += `  - If long-term thesis: suggest LEAPS (6–12 month)\n\n`;
+
+  prompt += `## 5. Primary Strategy Recommendation\n`;
+  prompt += `ONE specific strategy with full rationale:\n`;
+  prompt += `- **Strategy:** [e.g., Bull Call Spread, Iron Condor, Cash-Secured Put, etc.]\n`;
+  prompt += `- **Structure:** Specific legs described relative to key levels (e.g., "Buy ATM call near $X, sell call at resistance $Y")\n`;
+  prompt += `- **Suggested Expiration Window:** [timeframe with reasoning]\n`;
+  prompt += `- **Risk/Reward Profile:** Maximum loss, maximum gain, breakeven concept\n`;
+  prompt += `- **Why This Strategy:** Connect back to directional bias, volatility outlook, and catalyst timing — explain why this strategy (not another) fits\n\n`;
+
+  prompt += `## 6. Alternative Strategies\n`;
+  prompt += `Provide 1–2 alternatives for different scenarios:\n`;
+  prompt += `- **More Conservative Alternative:** [strategy for lower risk tolerance]\n`;
+  prompt += `- **More Aggressive Alternative:** [strategy if conviction is higher]\n`;
+  prompt += `- For each: name, brief structure, and when to prefer it over the primary\n\n`;
+
+  prompt += `## 7. Risk Warnings & Position Management\n`;
+  prompt += `- **What Invalidates This Trade:** Specific price levels, events, or conditions that would make you exit\n`;
+  prompt += `- **Maximum Loss Scenario:** Describe worst case clearly\n`;
+  prompt += `- **Greeks Awareness:**\n`;
+  prompt += `  - Theta: time decay implications for the recommended structure\n`;
+  prompt += `  - Vega: impact if IV changes direction\n`;
+  prompt += `  - Delta: directional exposure\n`;
+  prompt += `- **Position Sizing Guidance:** Based on consensus conviction level (unanimous = can size larger, split = size smaller)\n\n`;
+
+  prompt += `Format as markdown. Be specific — use actual numbers from the analysis wherever available. When exact numbers are not available, state that clearly rather than inventing values.`;
+
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://trading-agents.up.railway.app",
+        "X-Title": "Trading Agents Swarm",
+      },
+      body: JSON.stringify({
+        model: "z-ai/glm-5:nitro",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 32000,
+        temperature: 0.2,
+      }),
+      signal: AbortSignal.timeout(120_000),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      res.status(502).json({ error: `OpenRouter error: ${errText}` });
+      return;
+    }
+
+    const data = await response.json() as { choices: Array<{ message: { content: string } }> };
+    const strategy = data.choices[0]?.message?.content ?? "";
+    res.json({ strategy });
+  } catch (err) {
+    console.error("Options strategy error:", err);
+    res.status(500).json({ error: "Failed to generate options strategy" });
+  }
+});
+
 function shortName(model: string): string {
   const afterSlash = model.split("/").pop() ?? model;
   return afterSlash.split(":")[0];

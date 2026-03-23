@@ -5,11 +5,14 @@ import { DecisionCard } from "./DecisionCard";
 import { ConsensusBanner } from "./ConsensusBanner";
 import { ConsensusSummaryCard } from "./ConsensusSummaryCard";
 import { DeliberationCard } from "./DeliberationCard";
+import { OptionsStrategyCard } from "./OptionsStrategyCard";
 import { type ConsensusResult } from "@/hooks/use-consensus-stream";
 import { useConsensusSummary } from "@/hooks/use-consensus-summary";
 import { useDeliberation } from "@/hooks/use-deliberation";
+import { useOptionsStrategy } from "@/hooks/use-options-strategy";
 import { type useAgentStream, type AgentState } from "@/hooks/use-agent-stream";
 import { cn } from "./Badge";
+import { BrainCircuit, Swords, Target } from "lucide-react";
 
 type StreamInstance = ReturnType<typeof useAgentStream>;
 
@@ -106,25 +109,19 @@ export function ConsensusView({ streams, consensus, models, ids, ticker, date }:
 
   const { state: summaryState, generate } = useConsensusSummary(ids, ticker, date, models);
   const { state: deliberationState, generate: generateDeliberation } = useDeliberation(ids, ticker, date, models);
+  const { state: optionsState, generate: generateOptions } = useOptionsStrategy(ids, ticker, date, models);
+
+  const [selectedAnalysis, setSelectedAnalysis] = useState<"consensus" | "deliberation" | "options" | null>(null);
 
   const allDone = streams.every(
     (s) => s.streamData.status === "completed" || s.streamData.status === "error"
   );
-  const autoTriggeredRef = useRef(false);
   const idsKey = ids.join(",");
 
-  // Reset auto-trigger guard when IDs change (new consensus run)
+  // Reset selection when IDs change (new consensus run)
   useEffect(() => {
-    autoTriggeredRef.current = false;
+    setSelectedAnalysis(null);
   }, [idsKey]);
-
-  // Auto-trigger deep analysis once all streams finish
-  useEffect(() => {
-    if (allDone && ids.every((id) => id !== null) && !autoTriggeredRef.current && summaryState.status === "idle") {
-      autoTriggeredRef.current = true;
-      generate();
-    }
-  }, [allDone]);
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -186,14 +183,76 @@ export function ConsensusView({ streams, consensus, models, ids, ticker, date }:
         })}
       </Tabs>
 
-      {/* Deep synthesis — always shown when IDs are available */}
-      {ids.some((id) => id !== null) && (
-        <ConsensusSummaryCard state={summaryState} onGenerate={generate} />
-      )}
+      {/* Deep analysis picker — shown when all models are done */}
+      {allDone && ids.some((id) => id !== null) && (
+        <div className="space-y-6">
+          {/* Picker buttons */}
+          <div className="glass-panel rounded-2xl p-6">
+            <p className="text-xs text-muted-foreground font-mono uppercase tracking-widest mb-4">
+              Deep Analysis
+            </p>
+            <div className="grid grid-cols-3 gap-3">
+              {([
+                {
+                  key: "consensus" as const,
+                  icon: BrainCircuit,
+                  label: "Consensus Analysis",
+                  desc: "Cross-model phase synthesis",
+                  color: "primary",
+                  activeClasses: "border-primary/50 bg-primary/10 text-primary",
+                  iconClasses: "text-primary",
+                },
+                {
+                  key: "deliberation" as const,
+                  icon: Swords,
+                  label: "Committee Deliberation",
+                  desc: "Bull vs bear debate",
+                  color: "warning",
+                  activeClasses: "border-warning/50 bg-warning/10 text-warning",
+                  iconClasses: "text-warning",
+                },
+                {
+                  key: "options" as const,
+                  icon: Target,
+                  label: "Options Strategy",
+                  desc: "Strike selection & strategy",
+                  color: "emerald",
+                  activeClasses: "border-emerald-400/50 bg-emerald-400/10 text-emerald-400",
+                  iconClasses: "text-emerald-400",
+                },
+              ]).map(({ key, icon: Icon, label, desc, activeClasses, iconClasses }) => {
+                const isActive = selectedAnalysis === key;
+                return (
+                  <button
+                    key={key}
+                    onClick={() => setSelectedAnalysis(isActive ? null : key)}
+                    className={cn(
+                      "flex flex-col items-center gap-2 p-4 rounded-xl border transition-all text-center",
+                      isActive
+                        ? activeClasses
+                        : "border-border hover:border-foreground/20 text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <Icon className={cn("h-5 w-5", isActive ? iconClasses : "text-muted-foreground")} />
+                    <span className="font-mono text-xs font-bold">{label}</span>
+                    <span className="text-[10px] text-muted-foreground">{desc}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
-      {/* Investment committee deliberation — user-initiated */}
-      {ids.some((id) => id !== null) && (
-        <DeliberationCard state={deliberationState} onGenerate={generateDeliberation} />
+          {/* Selected analysis card */}
+          {selectedAnalysis === "consensus" && (
+            <ConsensusSummaryCard state={summaryState} onGenerate={generate} />
+          )}
+          {selectedAnalysis === "deliberation" && (
+            <DeliberationCard state={deliberationState} onGenerate={generateDeliberation} />
+          )}
+          {selectedAnalysis === "options" && (
+            <OptionsStrategyCard state={optionsState} onGenerate={generateOptions} />
+          )}
+        </div>
       )}
     </div>
   );
