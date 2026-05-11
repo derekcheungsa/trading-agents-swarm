@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install pnpm via Corepack (properly sets npm_config_user_agent for lifecycle scripts)
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@11.1.0 --activate
 
 WORKDIR /app
 
@@ -19,8 +19,7 @@ COPY tsconfig.json tsconfig.base.json ./
 COPY production-start.sh ./
 
 # Install Node.js dependencies
-RUN pnpm install --frozen-lockfile --ignore-scripts && \
-    pnpm rebuild esbuild @swc/core msw unrs-resolver
+RUN pnpm install --frozen-lockfile
 
 # Pre-install Python dependencies (avoids slow cold-start pip install)
 RUN pip install --break-system-packages -r artifacts/python-agent/requirements.txt
