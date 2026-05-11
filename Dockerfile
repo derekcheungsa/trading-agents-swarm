@@ -5,8 +5,8 @@ RUN apt-get update && apt-get install -y \
     python3 python3-pip python3-venv git curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install pnpm
-RUN npm install -g pnpm
+# Install pnpm via Corepack (properly sets npm_config_user_agent for lifecycle scripts)
+RUN corepack enable && corepack prepare pnpm@latest --activate
 
 WORKDIR /app
 
