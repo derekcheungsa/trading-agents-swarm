@@ -19,7 +19,8 @@ COPY tsconfig.json tsconfig.base.json ./
 COPY production-start.sh ./
 
 # Install Node.js dependencies
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --ignore-scripts && \
+    pnpm rebuild esbuild @swc/core msw unrs-resolver
 
 # Pre-install Python dependencies (avoids slow cold-start pip install)
 RUN pip install --break-system-packages -r artifacts/python-agent/requirements.txt
