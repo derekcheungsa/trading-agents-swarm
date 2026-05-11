@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install pnpm via Corepack (properly sets npm_config_user_agent for lifecycle scripts)
-RUN corepack enable && corepack prepare pnpm@11.1.0 --activate
+RUN corepack enable && corepack prepare pnpm@10 --activate
 
 WORKDIR /app
 
